@@ -1,0 +1,5 @@
+{
+  "_comment": "The collector reads only the rows already visible on your saved default Capital IQ transcript page.",
+  "download_format": "word",
+  "max_per_run": 12
+}

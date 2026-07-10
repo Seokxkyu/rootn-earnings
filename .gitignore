@@ -1,0 +1,8 @@
+.browser_profile/
+logs/
+transcripts/
+output/
+__pycache__/
+*.pyc
+.env
+.claude/settings.local.json
