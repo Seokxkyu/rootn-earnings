@@ -302,6 +302,27 @@ def is_logged_in(page: Page) -> bool:
         return False
 
 
+def wait_visible(page: Page, selector: str, timeout: int = 8000):
+    """요소가 보일 때까지 대기해 Locator를 반환한다. navigation 중이어도 견딘다.
+
+    안 나타나거나 페이지 전환 중이면 None을 반환한다(count()처럼 즉시 크래시하지 않음).
+    """
+    try:
+        locator = page.locator(selector).first
+        locator.wait_for(state="visible", timeout=timeout)
+        return locator
+    except Exception:  # noqa: BLE001 - 요소 부재/전환 중은 None 처리
+        return None
+
+
+def safe_click(page: Page, selector: str, timeout: int = 5000) -> None:
+    """클릭 시도. 요소가 없거나 전환 중이면 조용히 넘어간다."""
+    try:
+        page.locator(selector).first.click(timeout=timeout)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def try_login(page: Page) -> bool:
     """세션 만료 시 재로그인.
 
@@ -317,20 +338,24 @@ def try_login(page: Page) -> bool:
     email_addr = os.environ.get("CAPIQ_EMAIL")
     password = os.environ.get("CAPIQ_PASSWORD")
 
-    email_input = page.locator(SEL["login_email"]).first
-    if email_addr and email_input.count() and email_input.is_visible():
+    # 로그인 페이지로의 리다이렉트(navigation)가 끝날 때까지 대기한다.
+    # 안정화 전에 Locator.count()를 부르면 "Execution context was destroyed"로 크래시한다.
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=15000)
+    except Exception:  # noqa: BLE001
+        pass
+    page.wait_for_timeout(2000)
+
+    email_input = wait_visible(page, SEL["login_email"])
+    if email_addr and email_input is not None:
         email_input.fill(email_addr)
-        next_btn = page.locator(SEL["login_next"]).first
-        if next_btn.count():
-            next_btn.click()
+        safe_click(page, SEL["login_next"])
         page.wait_for_timeout(3000)
 
-    password_input = page.locator(SEL["login_password"]).first
-    if password and password_input.count() and password_input.is_visible():
+    password_input = wait_visible(page, SEL["login_password"])
+    if password and password_input is not None:
         password_input.fill(password)
-        signin_btn = page.locator(SEL["login_signin"]).first
-        if signin_btn.count():
-            signin_btn.click()
+        safe_click(page, SEL["login_signin"])
         page.wait_for_timeout(5000)
 
     if is_logged_in(page):
