@@ -120,10 +120,18 @@ python scripts\collect_capiq_transcripts.py --dump
 | --- | --- | --- |
 | `XAI_API_KEY` | O | Grok 요약 API 키 |
 | `XAI_MODEL` | - | Grok 모델 (기본 `grok-4.5`) |
-| `TELEGRAM_BOT_TOKEN` | O | Telegram 봇 토큰 |
+| `TELEGRAM_BOT_TOKEN` | O | 종목 요약 전송 봇 토큰 |
 | `TELEGRAM_CHAT_ID` | O | 전송 대상 chat ID |
+| `ALERT_BOT_TOKEN` | - | 장애 알림 전용 봇 토큰 (없으면 요약 봇으로 폴백) |
+| `ALERT_CHAT_ID` | - | 장애 알림 대상 chat ID (없으면 `TELEGRAM_CHAT_ID` 재사용) |
 | `CAPIQ_EMAIL` | - | 세션 만료 재로그인 시 이메일 자동 입력용 (없으면 수동 입력) |
 | `CAPIQ_PASSWORD` | - | 세션 만료 재로그인 시 비밀번호 자동 입력용 (없으면 수동 입력) |
+
+### 알림 채널 분리
+
+- **종목 요약 + "✅ 완료" 알림** → `TELEGRAM_BOT_TOKEN` 봇
+- **장애 알림**(세션 만료, 수집 실패, 요약/전송 실패) → `ALERT_BOT_TOKEN` 봇
+- `ALERT_BOT_TOKEN`이 없으면 장애 알림도 요약 봇으로 간다(단일 봇 운영).
 
 ## 세션 만료 처리
 

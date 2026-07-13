@@ -60,3 +60,15 @@ class TelegramSettings:
         if not token or not chat_id:
             raise RuntimeError("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env first.")
         return cls(bot_token=token, chat_id=chat_id)
+
+    @classmethod
+    def alert_from_env(cls) -> "TelegramSettings":
+        """장애 알림 전용 봇 설정. ALERT_BOT_TOKEN이 없으면 기본 요약 봇으로 폴백한다.
+        ALERT_CHAT_ID가 없으면 요약과 동일한 TELEGRAM_CHAT_ID로 보낸다."""
+        token = os.getenv("ALERT_BOT_TOKEN", "").strip()
+        if not token:
+            return cls.from_env()
+        chat_id = os.getenv("ALERT_CHAT_ID", "").strip() or os.getenv("TELEGRAM_CHAT_ID", "").strip()
+        if not chat_id:
+            raise RuntimeError("Set ALERT_CHAT_ID or TELEGRAM_CHAT_ID in .env first.")
+        return cls(bot_token=token, chat_id=chat_id)

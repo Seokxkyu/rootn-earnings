@@ -68,15 +68,23 @@ def setup_logging() -> None:
     )
 
 
-def notify(text: str) -> bool:
-    """운영 알림을 Telegram으로 전송. 실패해도 파이프라인은 계속 진행한다."""
+def _send(settings, text: str) -> bool:
     try:
-        settings = TelegramSettings.from_env()
         sent = send_messages(settings, [sanitize_telegram_html(text)])
         return sent > 0
     except Exception as exc:  # noqa: BLE001 - 알림 실패가 파이프라인을 막지 않도록
-        log.error("운영 알림 전송 실패: %s", exc)
+        log.error("알림 전송 실패: %s", exc)
         return False
+
+
+def notify_alert(text: str) -> bool:
+    """장애/세션만료/실패 알림 → 전용 알림 봇(ALERT_BOT_TOKEN, 미설정 시 요약 봇으로 폴백)."""
+    return _send(TelegramSettings.alert_from_env(), text)
+
+
+def notify_ops(text: str) -> bool:
+    """정상 운영 상태(완료·heartbeat) 알림 → 기존 요약 봇."""
+    return _send(TelegramSettings.from_env(), text)
 
 
 def run_step(name: str, args: list[str]) -> int:
@@ -108,16 +116,17 @@ def main() -> int:
     started = datetime.now()
 
     if "--notify-test" in sys.argv:
-        ok = notify("🤖 <b>파이프라인 알림 테스트</b>\nTelegram 운영 알림 경로가 정상 동작합니다.")
-        log.info("알림 테스트 결과: %s", "성공" if ok else "실패")
-        return 0 if ok else 1
+        ok_alert = notify_alert("🚨 <b>장애 알림 봇 테스트</b>\n장애 알림 전용 봇 경로가 정상 동작합니다.")
+        ok_ops = notify_ops("🤖 <b>운영 알림 테스트</b>\n요약 봇(완료·heartbeat) 경로가 정상 동작합니다.")
+        log.info("알림 테스트: 장애봇=%s, 요약봇=%s", "성공" if ok_alert else "실패", "성공" if ok_ops else "실패")
+        return 0 if (ok_alert and ok_ops) else 1
 
     heartbeat = "--heartbeat" in sys.argv
 
     # --- STEP 1: 수집 ---
     code = run_step("수집", [str(COLLECT_SCRIPT)])
     if code == 2:
-        notify(
+        notify_alert(
             "⚠️ <b>CapIQ 세션 만료</b>\n"
             "로그인 세션이 만료되어 자동 수집을 못 했습니다.\n"
             "<code>collect_capiq_transcripts.py --setup</code>을 실행한 뒤 열리는 "
@@ -125,7 +134,7 @@ def main() -> int:
         )
         return 2
     if code != 0:
-        notify(f"⚠️ <b>CapIQ 수집 실패</b> (exit {code})\n서버 로그를 확인하세요.")
+        notify_alert(f"⚠️ <b>CapIQ 수집 실패</b> (exit {code})\n서버 로그를 확인하세요.")
         return code
 
     new_count = read_json_int(LATEST_RUN, "download_count")
@@ -134,7 +143,7 @@ def main() -> int:
     if new_count == 0:
         log.info("신규 transcript 없음. 요약·전송 단계 생략.")
         if heartbeat:
-            notify(
+            notify_ops(
                 f"🤖 <b>CapIQ 파이프라인</b>\n"
                 f"정상 실행. 신규 실적 transcript 없음 ({started:%Y-%m-%d %H:%M})."
             )
@@ -143,16 +152,16 @@ def main() -> int:
     # --- STEP 2: 요약 + 전송 ---
     code = run_step("요약·전송", [str(SUMMARY_SCRIPT), "--send"])
     if code != 0:
-        notify(
+        notify_alert(
             f"⚠️ <b>요약/전송 실패</b> (exit {code})\n"
             f"수집은 {new_count}건 완료됐으나 요약 단계에서 실패했습니다. 로그를 확인하세요."
         )
         return code
 
-    # --- STEP 3: 완료 알림 ---
+    # --- STEP 3: 완료 알림 (정상 운영 → 요약 봇) ---
     sent = read_json_int(LATEST_BATCH, "summary_count")
     elapsed = (datetime.now() - started).total_seconds()
-    notify(
+    notify_ops(
         f"✅ <b>CapIQ 파이프라인 완료</b>\n"
         f"수집 {new_count}건 → 요약·전송 {sent}건 (소요 {elapsed:.0f}초)"
     )
