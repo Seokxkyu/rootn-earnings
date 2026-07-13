@@ -52,24 +52,33 @@ def summarize_file(settings: GrokSettings, path: Path) -> dict:
     session = extract_session(transcript_text)
     chunks = split_text(transcript_text, max_chars=prompts.CHUNK_CHAR_LIMIT)
 
-    chunk_summaries = []
-    for chunk_idx, chunk in enumerate(chunks, start=1):
-        log.info("  chunk %d/%d", chunk_idx, len(chunks))
-        chunk_summary = call_grok(
-            settings,
-            system_prompt=prompts.CHUNK_SYSTEM_PROMPT,
-            user_prompt="[METADATA]\n" + metadata_block + "\n\n[CHUNK]\n" + chunk,
-            max_output_tokens=prompts.CHUNK_SUMMARY_MAX_OUTPUT_TOKENS,
-        )
-        chunk_summaries.append(f"### Chunk {chunk_idx}\n{chunk_summary}")
-        time.sleep(prompts.REQUEST_PAUSE_SEC)
+    if len(chunks) <= 1:
+        # 1-pass: 원문을 최종 프롬프트에 직접 투입한다. 청크 요약 단계를 생략해
+        # 정보 손실·번역투 전파·맥락 단절을 피한다.
+        log.info("  1-pass (원문 직접 투입, %d자)", len(transcript_text))
+        final_source = transcript_text
+    else:
+        # multi-pass: 초장문만 청크별로 사실 추출 후 합쳐서 최종 요약한다.
+        log.info("  multi-pass (%d청크)", len(chunks))
+        chunk_summaries = []
+        for chunk_idx, chunk in enumerate(chunks, start=1):
+            log.info("  chunk %d/%d", chunk_idx, len(chunks))
+            chunk_summary = call_grok(
+                settings,
+                system_prompt=prompts.CHUNK_SYSTEM_PROMPT,
+                user_prompt="[METADATA]\n" + metadata_block + "\n\n[CHUNK]\n" + chunk,
+                max_output_tokens=prompts.CHUNK_SUMMARY_MAX_OUTPUT_TOKENS,
+            )
+            chunk_summaries.append(f"### Chunk {chunk_idx}\n{chunk_summary}")
+            time.sleep(prompts.REQUEST_PAUSE_SEC)
+        final_source = "\n\n".join(chunk_summaries)
 
     final_prompt = prompts.FINAL_USER_PROMPT_TEMPLATE
     final_prompt = final_prompt.replace("{{TICKER}}", ticker)
     final_prompt = final_prompt.replace("{{QUARTER}}", quarter)
     final_prompt = final_prompt.replace("{{SESSION}}", session)
     final_prompt = final_prompt.replace("{{METADATA}}", metadata_block)
-    final_prompt = final_prompt.replace("{{TRANSCRIPT}}", "\n\n".join(chunk_summaries))
+    final_prompt = final_prompt.replace("{{TRANSCRIPT}}", final_source)
 
     final_summary = call_grok(
         settings,
