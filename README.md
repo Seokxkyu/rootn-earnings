@@ -116,15 +116,25 @@ python scripts\collect_capiq_transcripts.py --dump
 
 ## 환경변수
 
-| 이름 | 설명 |
-| --- | --- |
-| `CAPIQ_EMAIL` | 세션 만료 시 Capital IQ 로그인 ID |
-| `CAPIQ_PASSWORD` | 세션 만료 시 Capital IQ 비밀번호 |
-| `GMAIL_USER` | MFA 이메일 조회용 Gmail 주소 |
-| `GMAIL_APP_PASSWORD` | Gmail IMAP 앱 비밀번호 |
-| `XAI_API_KEY` | Grok 요약 API 키 |
-| `XAI_MODEL` | Grok 모델 (기본 `grok-4.5`) |
-| `TELEGRAM_BOT_TOKEN` | Telegram 봇 토큰 |
-| `TELEGRAM_CHAT_ID` | 전송 대상 chat ID |
+| 이름 | 필수 | 설명 |
+| --- | --- | --- |
+| `XAI_API_KEY` | O | Grok 요약 API 키 |
+| `XAI_MODEL` | - | Grok 모델 (기본 `grok-4.5`) |
+| `TELEGRAM_BOT_TOKEN` | O | Telegram 봇 토큰 |
+| `TELEGRAM_CHAT_ID` | O | 전송 대상 chat ID |
+| `CAPIQ_EMAIL` | - | 세션 만료 재로그인 시 이메일 자동 입력용 (없으면 수동 입력) |
+| `CAPIQ_PASSWORD` | - | 세션 만료 재로그인 시 비밀번호 자동 입력용 (없으면 수동 입력) |
+
+## 세션 만료 처리
+
+로그인 세션은 `.browser_profile`에 저장되어 "Keep Me Signed In"으로 오래 유지된다.
+세션이 만료되면:
+
+- `CAPIQ_EMAIL` / `CAPIQ_PASSWORD`가 있으면 이메일·비밀번호는 자동 입력된다.
+- **MFA 4자리 코드는 자동 조회하지 않는다.** 인증 메일이 Gmail이 아니므로 IMAP
+  자동조회 로직은 제거했다. 세션 만료 시 열린 브라우저 창에서 사용자가 직접 MFA 코드를
+  입력해 로그인을 완료한다 (`--setup` 실행 시 최대 5분 대기).
+- 무인 실행 중 만료되면 collect가 exit 2로 끝나고, 통합 파이프라인이
+  "⚠️ 세션 만료" Telegram 알림을 보낸다. 이후 사람이 한 번 `--setup`으로 로그인하면 된다.
 
 Gmail 환경변수는 자동 MFA 조회를 쓸 때만 필요하다.

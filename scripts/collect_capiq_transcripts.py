@@ -18,17 +18,13 @@ Flow:
 from __future__ import annotations
 
 import csv
-import email as email_lib
-import imaplib
 import json
 import logging
 import os
 import re
 import sys
 import time
-from datetime import datetime, timedelta
-from email.message import Message
-from email.utils import parsedate_to_datetime
+from datetime import datetime
 from pathlib import Path
 
 from playwright.sync_api import Locator, Page, TimeoutError as PWTimeout, sync_playwright
@@ -56,13 +52,15 @@ TRANSCRIPTS_URL = (
 
 BUTTON_LABELS = {"PDF", "WORD", "MP3"}
 
+# 세션 만료 시 사용자가 브라우저 창에서 직접 로그인(MFA 포함)을 완료할 때까지 대기하는 최대 시간.
+MANUAL_LOGIN_TIMEOUT_SEC = 300
+
 SEL = {
     "login_email": "input[type='email'], input[placeholder*='Email' i]",
     "login_next": "button:has-text('NEXT'), button:has-text('Next')",
     "login_password": "input[type='password']",
     "login_signin": "button:has-text('SIGN IN'), button:has-text('Sign In')",
     "mfa_input": "input[autocomplete='one-time-code'], input[name*='code' i], input[placeholder*='code' i]",
-    "mfa_submit": "button:has-text('VERIFY'), button:has-text('Verify'), button:has-text('Submit')",
     "grid_row": "[role='row'], tr",
     "row_word_button": "[title*='WORD' i], [aria-label*='WORD' i], button:has-text('WORD'), a:has-text('WORD'), a.hui-download-btn-doc",
     "row_pdf_button": "[title*='PDF' i], [aria-label*='PDF' i], button:has-text('PDF'), a:has-text('PDF'), a.hui-download-btn-pdf",
@@ -289,72 +287,6 @@ def write_run_outputs(downloaded: list[dict], run_started_at: datetime, run_fini
             writer.writerow({field: row.get(field, "") for field in MANIFEST_FIELDS})
 
 
-def extract_mfa_code(text: str) -> str | None:
-    patterns = [
-        r"(?:verification|authentication|security|one[- ]time|passcode|code)"
-        r"[^0-9]{0,80}\b(\d{4,8})\b",
-        r"\b(\d{4,8})\b[^.\r\n]{0,50}"
-        r"(?:verification|authentication|security|one[- ]time|passcode|code)",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text, re.I)
-        if match:
-            return match.group(1)
-    return None
-
-
-def message_is_recent(msg: Message, since: datetime) -> bool:
-    try:
-        received_at = parsedate_to_datetime(msg.get("Date", ""))
-        if received_at is None:
-            return False
-        if received_at.tzinfo is None:
-            received_at = received_at.astimezone()
-        if since.tzinfo is None:
-            since = since.astimezone()
-        return received_at >= since
-    except (TypeError, ValueError, OverflowError):
-        return False
-
-
-def fetch_mfa_code_from_gmail(since: datetime, timeout_sec: int = 180) -> str | None:
-    user = os.environ.get("GMAIL_USER")
-    app_pw = os.environ.get("GMAIL_APP_PASSWORD")
-    if not (user and app_pw):
-        log.info("Gmail MFA lookup is not configured.")
-        return None
-
-    deadline = time.time() + timeout_sec
-    while time.time() < deadline:
-        try:
-            with imaplib.IMAP4_SSL("imap.gmail.com") as imap:
-                imap.login(user, app_pw)
-                imap.select("INBOX")
-                date_str = since.strftime("%d-%b-%Y")
-                _, data = imap.search(None, f'(SINCE "{date_str}" FROM "spglobal")')
-                ids = data[0].split()
-                for msg_id in reversed(ids[-5:]):
-                    _, msg_data = imap.fetch(msg_id, "(RFC822)")
-                    msg = email_lib.message_from_bytes(msg_data[0][1])
-                    if not message_is_recent(msg, since):
-                        continue
-
-                    body = ""
-                    if msg.is_multipart():
-                        for part in msg.walk():
-                            if part.get_content_type() in ("text/plain", "text/html"):
-                                body += part.get_payload(decode=True).decode(errors="ignore")
-                    else:
-                        body = msg.get_payload(decode=True).decode(errors="ignore")
-                    code = extract_mfa_code(f"{msg.get('Subject', '')}\n{body}")
-                    if code:
-                        return code
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Gmail IMAP lookup failed: %s", exc)
-        time.sleep(15)
-    return None
-
-
 def is_logged_in(page: Page) -> bool:
     url = page.url.lower()
     if "login" in url or "web/client" not in url:
@@ -371,43 +303,50 @@ def is_logged_in(page: Page) -> bool:
 
 
 def try_login(page: Page) -> bool:
+    """세션 만료 시 재로그인.
+
+    이메일/비밀번호는 환경변수(CAPIQ_EMAIL / CAPIQ_PASSWORD)가 있으면 자동 입력해
+    수동 단계를 줄인다. 다만 MFA 4자리 코드는 자동 조회하지 않는다.
+    (인증 메일이 Gmail이 아니므로 IMAP 자동조회를 제거했다.)
+
+    로그인 완료(Transcripts 화면 진입)를 최대 MANUAL_LOGIN_TIMEOUT_SEC 동안 폴링한다.
+    사용자는 열린 Playwright 브라우저 창에서 필요한 단계(비어 있으면 이메일/비밀번호,
+    그리고 항상 MFA 코드)를 직접 입력하면 된다. 무인 실행이라 아무도 입력하지 않으면
+    타임아웃되어 False를 반환하고, 상위 파이프라인이 세션 만료 알림을 보낸다.
+    """
     email_addr = os.environ.get("CAPIQ_EMAIL")
     password = os.environ.get("CAPIQ_PASSWORD")
-    if not email_addr or not password:
-        log.error("CAPIQ_EMAIL and CAPIQ_PASSWORD are required when the session expires.")
-        return False
-
-    mfa_request_time = datetime.now().astimezone() - timedelta(minutes=1)
 
     email_input = page.locator(SEL["login_email"]).first
-    if email_input.count() and email_input.is_visible():
+    if email_addr and email_input.count() and email_input.is_visible():
         email_input.fill(email_addr)
-        page.locator(SEL["login_next"]).first.click()
+        next_btn = page.locator(SEL["login_next"]).first
+        if next_btn.count():
+            next_btn.click()
         page.wait_for_timeout(3000)
 
     password_input = page.locator(SEL["login_password"]).first
-    if password_input.count() and password_input.is_visible():
+    if password and password_input.count() and password_input.is_visible():
         password_input.fill(password)
-        mfa_request_time = datetime.now().astimezone()
-        page.locator(SEL["login_signin"]).first.click()
+        signin_btn = page.locator(SEL["login_signin"]).first
+        if signin_btn.count():
+            signin_btn.click()
         page.wait_for_timeout(5000)
 
-    mfa_input = page.locator(SEL["mfa_input"]).first
-    if mfa_input.count() and mfa_input.is_visible():
-        code = fetch_mfa_code_from_gmail(since=mfa_request_time)
-        if not code:
-            log.error("MFA is required but no email code could be retrieved.")
-            return False
-        mfa_input.fill(code)
-        submit = page.locator(SEL["mfa_submit"]).first
-        if submit.count():
-            submit.click()
-        else:
-            mfa_input.press("Enter")
-        page.wait_for_timeout(5000)
+    if is_logged_in(page):
+        return True
 
-    page.wait_for_timeout(3000)
-    return is_logged_in(page)
+    log.warning(
+        "세션이 만료되었습니다. 열린 브라우저 창에서 로그인을 완료하세요 "
+        "(필요 시 이메일/비밀번호 입력 후, MFA 4자리 코드 직접 입력). 최대 %d초 대기합니다.",
+        MANUAL_LOGIN_TIMEOUT_SEC,
+    )
+    deadline = time.time() + MANUAL_LOGIN_TIMEOUT_SEC
+    stable_checks = 0
+    while time.time() < deadline and stable_checks < 2:
+        time.sleep(5)
+        stable_checks = stable_checks + 1 if is_logged_in(page) else 0
+    return stable_checks >= 2
 
 
 def extract_company_and_event(row: Locator, row_text: str) -> tuple[str, str]:
