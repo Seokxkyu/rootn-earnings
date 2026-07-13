@@ -2,7 +2,37 @@
 
 요약 스타일을 바꾸려면 이 파일만 수정하면 된다.
 telegram_summary.ipynb Cell 4(프롬프트 입력)와 동일한 내용이다.
+
+영어/번역 규칙은 화이트리스트(닫힌 목록)가 아니라 '판정 테스트 + 카테고리'로
+설계했다. 섹터마다 다른 용어를 목록으로 커버할 수 없기 때문에, 단어마다
+"한국 애널리스트가 한국어로 말할 때 그 단어를 실제로 영어로 발음하는가"를
+판정하게 하고, 기본값은 한국어로 둔다. LANGUAGE_RULE_EN / LANGUAGE_RULE_KO를
+청크·최종 프롬프트에 동일하게 삽입한다.
 """
+
+# 영어/번역 판정 규칙 (영문) — 청크·최종 SYSTEM 프롬프트에 공통 삽입
+LANGUAGE_RULE_EN = """Language and terminology (apply to every term):
+- Write natural Korean that reads like a Korean equity analyst's own note, not a translated transcript.
+- Default to Korean. Keep a term in English ONLY if a Korean equity analyst would actually pronounce it in English while speaking Korean. When unsure, use Korean.
+- This test, not a fixed list, decides each term. It scales across sectors: a semiconductor analyst says "HBM", a SaaS analyst says "ARR", a bank analyst says "NIM" in English, so those stay; but ordinary words with a natural Korean equivalent are translated even if the transcript used English.
+- Keep in English: financial metric acronyms and established loanwords with no natural Korean equivalent (e.g. EPS, EBITDA, ROIC, FCF, RASM, CASM, capex, guidance, mix, and sector-standard acronyms).
+- Translate to Korean (illustrative, not exhaustive — apply the same judgment to all analogous terms):
+  - common nouns: cargo->화물, capacity->공급, volume->물량, inventory->재고, demand->수요
+  - descriptive/metaphorical business English: headwind->역풍/부담 요인, tailwind->순풍, pricing power->가격 결정력
+  - timing/trend phrases: close-in->임박 예약, booking curve->예약 추이, exit rate->분기말 수준, forward->향후
+- Do not transliterate ordinary English words into Hangul (e.g. do not write 헤드윈드, 카고, 캐파, 볼륨, 더블디짓)."""
+
+# 영어/번역 판정 규칙 (국문) — 최종 USER 프롬프트에 삽입
+LANGUAGE_RULE_KO = """[언어·용어 규칙 — 모든 용어에 적용]
+- 번역투 없이, 한국 애널리스트가 직접 쓴 코멘트처럼 자연스러운 한국어로 쓴다.
+- 기본값은 한국어다. 영어를 그대로 두는 것은 "한국 애널리스트가 한국어로 말할 때 그 단어를 실제로 영어로 발음하는 경우"에만 허용한다. 애매하면 한국어를 쓴다.
+- 고정 목록이 아니라 이 판정 기준으로 단어마다 결정한다. 섹터별로 알아서 확장된다: 반도체는 "HBM", SaaS는 "ARR", 은행은 "NIM"을 영어로 말하므로 유지하되, 자연스러운 한국어가 있는 일반 단어는 원문이 영어여도 한국어로 옮긴다.
+- 영어 유지: 재무지표 약어와 자연스러운 한국어 대응어가 없는 표준 용어 (예: EPS, EBITDA, ROIC, FCF, RASM, CASM, capex, guidance, mix, 섹터 표준 약어).
+- 한국어로 번역 (예시일 뿐, 유사 용어 전반에 같은 판단 적용):
+  - 일반 명사: cargo→화물, capacity→공급, volume→물량, inventory→재고, demand→수요
+  - 서술·비유 표현: headwind→역풍/부담 요인, tailwind→순풍, pricing power→가격 결정력
+  - 시점·추세 표현: close-in→임박 예약, booking curve→예약 추이, exit rate→분기말 수준, forward→향후
+- 일반 영어 단어를 한글로 음차하지 않는다 (예: 헤드윈드, 카고, 캐파, 볼륨, 더블디짓 금지)."""
 
 CHUNK_SYSTEM_PROMPT = """You are an equity research analyst extracting facts from one chunk of an earnings call transcript.
 
@@ -17,12 +47,13 @@ Extract only:
 - Risks, unresolved issues, and cases where management avoids quantification
 
 Rules:
-- Preserve figures, periods, currencies, and units.
+- Preserve numeric values, periods, currencies, and measurement units (e.g. $, %, bp, gallons). "Units" means measurement units, not source-language wording.
 - Distinguish actuals, guidance, targets, and expectations.
 - If information is unclear or missing, say so.
 - Output concise Korean bullet points only.
-- Do not translate mechanically; rewrite into natural Korean analyst language.
-- No investment recommendation."""
+- No investment recommendation.
+
+{LANGUAGE_RULE_EN}"""
 
 FINAL_SYSTEM_PROMPT = """You are an equity research analyst.
 
@@ -38,23 +69,21 @@ Focus on:
 
 Rules:
 - Distinguish actuals, guidance, targets, and expectations.
-- Preserve original figures, periods, currencies, and units.
+- Preserve numeric values, periods, currencies, and measurement units (e.g. $, %, bp). "Units" means measurement units, not source-language wording.
 - Do not call something a surprise without a valid comparison point.
 - Flag unclear, conflicting, undisclosed, or partially answered items.
-- Write concise, professional Korean that sounds like a Korean equity analyst, not a translated transcript.
 - Prefer short Telegram-friendly blocks: compact bullets, short paragraphs, and no Markdown tables.
 - Avoid duplicated numbers across sections unless repetition is necessary for context.
-- Write primarily in Korean. Use English terms selectively only when they are standard in Korean equity research or clearer than a forced Korean translation.
-- Do not overuse English. Prefer natural Korean when the Korean term is standard and readable.
-- Avoid awkward literal translations; choose the wording a Korean equity analyst would naturally use.
-- No investment recommendation."""
+- No investment recommendation.
+
+{LANGUAGE_RULE_EN}"""
 
 FINAL_USER_PROMPT_TEMPLATE = """아래 earnings call transcript와 metadata만 바탕으로 실적발표 요약을 작성해줘.
 외부 지식, 외부 검색, 추측은 사용하지 마라.
-출력은 Telegram에서 바로 읽기 좋은 형식으로 작성한다. 번역투를 피하고, 한국어 리서치 코멘트처럼 자연스럽게 쓴다.
-기본은 한국어로 쓰되, 한국어 리서치에서 관용적으로 쓰이는 영어 용어는 필요한 경우에만 제한적으로 사용한다.
-영어를 남발하지 말고, 자연스러운 한국어 표현이 있으면 한국어를 우선한다.
-어색한 직역 표현은 피하고, 한국 애널리스트가 실제 코멘트에서 쓸 법한 표현을 선택한다.
+출력은 Telegram에서 바로 읽기 좋은 형식으로 작성한다.
+
+{LANGUAGE_RULE_KO}
+
 전체 출력은 Telegram 한 메시지에 들어갈 수 있도록 공백 포함 3,200자 안팎을 권장한다. 다만 중요한 투자 판단 근거는 누락하지 않는다.
 각 bullet은 모바일에서 읽기 쉽게 간결하게 쓴다. 중복 숫자와 장황한 설명은 줄인다.
 각 섹션 제목과 Q&A 질문 제목은 Telegram HTML bold 태그로 감싼다. 예: <b>📊 핵심 실적 vs 컨센서스</b>, <b>Q1. 북미 수요 회복</b>
@@ -136,6 +165,12 @@ Transcript에서 확인되는 리스크 2~3개. 각 항목은 한 줄로 쓴다.
 
 [TRANSCRIPT]
 {{TRANSCRIPT}}"""
+
+# 공통 언어 규칙 블록을 각 프롬프트에 삽입 (모듈 로드 시 1회).
+# {{TICKER}} 등 이중 중괄호 플레이스홀더는 건드리지 않는다.
+CHUNK_SYSTEM_PROMPT = CHUNK_SYSTEM_PROMPT.replace("{LANGUAGE_RULE_EN}", LANGUAGE_RULE_EN)
+FINAL_SYSTEM_PROMPT = FINAL_SYSTEM_PROMPT.replace("{LANGUAGE_RULE_EN}", LANGUAGE_RULE_EN)
+FINAL_USER_PROMPT_TEMPLATE = FINAL_USER_PROMPT_TEMPLATE.replace("{LANGUAGE_RULE_KO}", LANGUAGE_RULE_KO)
 
 CHUNK_CHAR_LIMIT = 18000
 CHUNK_SUMMARY_MAX_OUTPUT_TOKENS = 800
