@@ -435,7 +435,15 @@ def scan_rows(
     downloaded: list[dict] = []
     seen_this_run: set[str] = set()
 
+    # 그리드(SPA)가 실제로 렌더될 때까지 대기한다. 스케줄러 콜드 스타트(밤새 유휴 후
+    # 실행)에서는 SPA 렌더가 느려, 고정 대기만으로는 빈 셸을 스캔해 "0행"으로
+    # 오판(신규를 놓침)할 수 있다. 그리드 행이 나타나면 로드가 끝난 것으로 본다.
+    try:
+        page.wait_for_selector(SEL["grid_row"], timeout=45000)
+    except PWTimeout:
+        log.info("그리드 행이 45초 내 나타나지 않음 (빈 그리드/신규 0으로 간주).")
     page.wait_for_timeout(3000)
+
     rows = page.locator(SEL["grid_row"])
     row_count = rows.count()
     log.info("Visible grid rows: %d", row_count)
