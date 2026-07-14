@@ -153,7 +153,10 @@ python scripts\collect_capiq_transcripts.py --dump
 
 - **완료·heartbeat** → 요약 봇(`TELEGRAM_BOT_TOKEN`)
 - **세션 만료·수집 실패·요약/전송 실패** → 장애 봇(`ALERT_BOT_TOKEN`)
-- 신규 transcript가 없으면 요약·전송을 건너뛰고 조용히 종료한다.
+- 신규 transcript가 없으면 요약·전송을 건너뛴다. 예약 작업은 기본으로 `--heartbeat`를
+  붙여 등록되므로, 신규 0건 날에도 "정상 실행" 알림이 하루 1회 온다 —
+  **아침 알림이 아예 없으면 비정상**(PC 꺼짐, 태스크 미실행 등)으로 보면 된다.
+  heartbeat 없이 등록하려면 `-NoHeartbeat`.
 
 수동 실행:
 

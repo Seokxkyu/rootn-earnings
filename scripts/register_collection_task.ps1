@@ -14,6 +14,7 @@ param(
     [string[]]$Times = @("07:30"),
     [int]$ExecutionMinutes = 30,
     [string]$PythonPath = "",
+    [switch]$NoHeartbeat,   # 기본은 --heartbeat 포함(신규 0건 날에도 정상 알림). 끄려면 지정.
     [switch]$DryRun
 )
 
@@ -72,11 +73,14 @@ if (-not (Test-Path -LiteralPath $pipelinePath -PathType Leaf)) {
 
 $python = Resolve-PipelinePython -RequestedPath $PythonPath
 $actionArgs = "`"$pipelinePath`""
+if (-not $NoHeartbeat) {
+    $actionArgs += " --heartbeat"
+}
 
 if ($DryRun) {
     Write-Output "Task: $taskName"
     Write-Output "Python: $python"
-    Write-Output "Script: $pipelinePath"
+    Write-Output "Arguments: $actionArgs"
     Write-Output "Working directory: $projectRoot"
     Write-Output "Daily times: $($Times -join ', ')"
     Write-Output "Execution time limit: $ExecutionMinutes min"
