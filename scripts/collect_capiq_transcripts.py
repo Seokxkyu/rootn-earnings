@@ -431,7 +431,12 @@ def scan_rows(
     seen: set[str],
     max_downloads: int,
     preferred_format: str,
-) -> list[dict]:
+) -> tuple[list[dict], int]:
+    """(다운로드 목록, 그리드 행 수)를 반환한다.
+
+    행 수가 0이면 로그인은 됐어도 그리드가 렌더되지 않은 것으로, 상위에서
+    '로드 실패 의심'으로 처리한다(정상적인 '신규 없음'은 항상 여러 행이 보인다).
+    """
     downloaded: list[dict] = []
     seen_this_run: set[str] = set()
 
@@ -511,7 +516,7 @@ def scan_rows(
         downloaded.append(entry)
         time.sleep(3)
 
-    return downloaded
+    return downloaded, row_count
 
 
 def main() -> int:
@@ -584,7 +589,7 @@ def main() -> int:
             ctx.close()
             return 0
 
-        downloaded = scan_rows(
+        downloaded, row_count = scan_rows(
             page=page,
             seen=seen,
             max_downloads=max_downloads,
@@ -596,6 +601,13 @@ def main() -> int:
         log.info("Completed run with %d new downloads", len(downloaded))
         for item in downloaded:
             log.info("  - %s | %s | %s", item["format"], item["event"], item["file"])
+
+        # 로그인은 됐는데 그리드 행이 0개면 페이지 로드 실패 의심(신규를 놓쳤을 수 있음).
+        # 정상 페이지는 신규가 없어도 최근 이벤트 행이 항상 보인다.
+        if row_count == 0 and not downloaded:
+            log.warning("그리드 행이 0개 - 페이지 로드 실패 의심(신규 누락 가능). 알림 대상.")
+            ctx.close()
+            return 3
 
         ctx.close()
     return 0

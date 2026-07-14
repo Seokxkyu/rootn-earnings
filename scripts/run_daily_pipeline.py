@@ -133,6 +133,13 @@ def main() -> int:
             "브라우저 창에서 로그인(이메일·비밀번호·MFA 4자리)을 완료하면 세션이 다시 유지됩니다."
         )
         return 2
+    if code == 3:
+        notify_alert(
+            "⚠️ <b>CapIQ 그리드 로드 실패 의심</b>\n"
+            "로그인은 정상이나 transcript 그리드가 비어 있어 신규를 못 읽었을 수 있습니다.\n"
+            "페이지 로딩이 느렸을 가능성이 크며, 로그 확인 후 필요하면 수동 재실행하세요."
+        )
+        return 3
     if code != 0:
         notify_alert(f"⚠️ <b>CapIQ 수집 실패</b> (exit {code})\n서버 로그를 확인하세요.")
         return code
