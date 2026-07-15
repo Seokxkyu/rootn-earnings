@@ -166,11 +166,11 @@ python scripts\run_daily_pipeline.py --heartbeat  # 신규 0건이어도 완료 
 python scripts\run_daily_pipeline.py --notify-test # 두 봇 알림 경로만 점검
 ```
 
-예약 작업 등록(기본 매일 08:30 KST, 실행 한도 60분):
+예약 작업 등록(현재 운영: 매일 08:30·15:00 KST, 실행 한도 60분):
 
 ```powershell
 python scripts\collect_capiq_transcripts.py --setup    # 최초 1회 로그인 세션 저장
-powershell scripts\register_collection_task.ps1 -Times "08:30" -ExecutionMinutes 60
+powershell scripts\register_collection_task.ps1 -Times "08:30","15:00" -ExecutionMinutes 60
 ```
 
 - 태스크 이름: `CapIQ Daily Pipeline`
