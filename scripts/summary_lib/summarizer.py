@@ -8,7 +8,13 @@ from pathlib import Path
 from . import prompts
 from .config import ROOT, SUMMARY_ROOT, GrokSettings
 from .grok_client import call_grok
-from .metadata import extract_metadata_block, extract_quarter, extract_session, extract_ticker
+from .metadata import (
+    extract_metadata_block,
+    extract_quarter,
+    extract_session,
+    extract_ticker,
+    title_label,
+)
 from .transcript_io import load_transcript_text, norm, slugify
 
 log = logging.getLogger("summary")
@@ -48,6 +54,7 @@ def summarize_file(settings: GrokSettings, path: Path) -> dict:
 
     metadata_block = extract_metadata_block(display_path, transcript_text)
     ticker = extract_ticker(transcript_text)
+    title = title_label(transcript_text, path.stem)  # 제목용: 회사명 (티커)
     quarter = extract_quarter(transcript_text)
     session = extract_session(transcript_text)
     chunks = split_text(transcript_text, max_chars=prompts.CHUNK_CHAR_LIMIT)
@@ -74,7 +81,7 @@ def summarize_file(settings: GrokSettings, path: Path) -> dict:
         final_source = "\n\n".join(chunk_summaries)
 
     final_prompt = prompts.FINAL_USER_PROMPT_TEMPLATE
-    final_prompt = final_prompt.replace("{{TICKER}}", ticker)
+    final_prompt = final_prompt.replace("{{TICKER}}", title)
     final_prompt = final_prompt.replace("{{QUARTER}}", quarter)
     final_prompt = final_prompt.replace("{{SESSION}}", session)
     final_prompt = final_prompt.replace("{{METADATA}}", metadata_block)
