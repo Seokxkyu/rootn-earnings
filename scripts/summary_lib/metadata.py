@@ -5,11 +5,12 @@ from pathlib import Path
 
 from .transcript_io import norm
 
-# CapIQ transcript 상단에 나오는 거래소 접두 티커 (예: NasdaqGS:PEP, NYSE:KO)
+# CapIQ transcript 상단에 나오는 거래소 접두 티커.
+# 미국은 알파벳(NasdaqGS:PEP), 일본/아시아는 숫자(TSE:4443)이므로 티커는 영숫자 시작을 허용한다.
 EXCHANGE_TICKER_RE = re.compile(
     r"\b(?:NYSE|NYSEAM|NasdaqGS|NasdaqGM|NasdaqCM|Nasdaq|AMEX|OTCPK|OTCQX|OTCQB|"
-    r"TSX|TSXV|LSE|AIM|ENXTPA|ENXTAM|ENXTBR|XTRA|SWX|SEHK|TSE|KOSE|KOSDAQ|ASX|BSE|NSEI)"
-    r"\s*:\s*([A-Z][A-Z0-9.]{0,7})\b"
+    r"TSX|TSXV|LSE|AIM|ENXTPA|ENXTAM|ENXTBR|XTRA|SWX|SEHK|TSE|TSEC|KOSE|KOSDAQ|ASX|BSE|NSEI)"
+    r"\s*:\s*([A-Z0-9][A-Z0-9.]{0,7})\b"
 )
 FALLBACK_TICKER_RE = re.compile(r"\b[A-Z][A-Za-z]+[: ]([A-Z]{1,6})\b")
 
