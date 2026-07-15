@@ -527,18 +527,26 @@ def scan_rows(
         dest_dir = TRANSCRIPTS_DIR / downloaded_at.strftime("%Y-%m-%d")
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        try:
-            with page.expect_download(timeout=60000) as dl_info:
-                download_btn.click()
-            download = dl_info.value
-            suffix = ".docx" if actual_format == "word" else ".pdf"
-            fallback_name = safe_path_component(f"{company}_{event}") + suffix
-            filename = download.suggested_filename or fallback_name
-            dest = dest_dir / filename
-            download.save_as(dest)
-        except PWTimeout:
-            log.error("Download timed out for key: %s", key)
+        # 다운로드는 간헐적으로 오래 걸린다(특히 일본 기업 ENG-TRANSL 번역 문서).
+        # 90초 타임아웃으로 같은 실행 안에서 2회까지 재시도한다.
+        download = None
+        for attempt in range(1, 3):
+            try:
+                with page.expect_download(timeout=90000) as dl_info:
+                    download_btn.click()
+                download = dl_info.value
+                break
+            except PWTimeout:
+                log.warning("다운로드 타임아웃 (시도 %d/2): %s", attempt, key)
+                page.wait_for_timeout(3000)
+        if download is None:
+            log.error("Download failed after retries: %s", key)
             continue
+        suffix = ".docx" if actual_format == "word" else ".pdf"
+        fallback_name = safe_path_component(f"{company}_{event}") + suffix
+        filename = download.suggested_filename or fallback_name
+        dest = dest_dir / filename
+        download.save_as(dest)
 
         size = dest.stat().st_size
         log.info(
