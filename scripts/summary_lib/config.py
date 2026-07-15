@@ -62,6 +62,16 @@ class TelegramSettings:
         return cls(bot_token=token, chat_id=chat_id)
 
     @classmethod
+    def jp_from_env(cls) -> "TelegramSettings | None":
+        """일본 기업 요약을 추가 전송할 chat. 요약 봇(TELEGRAM_BOT_TOKEN)을 재사용하며,
+        JP_TELEGRAM_CHAT_ID가 없으면 None(추가 전송 안 함)."""
+        chat_id = os.getenv("JP_TELEGRAM_CHAT_ID", "").strip()
+        token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+        if not chat_id or not token:
+            return None
+        return cls(bot_token=token, chat_id=chat_id)
+
+    @classmethod
     def alert_from_env(cls) -> "TelegramSettings":
         """장애 알림 전용 봇 설정. ALERT_BOT_TOKEN이 없으면 기본 요약 봇으로 폴백한다.
         ALERT_CHAT_ID가 없으면 요약과 동일한 TELEGRAM_CHAT_ID로 보낸다."""

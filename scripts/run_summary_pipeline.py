@@ -91,11 +91,24 @@ def main() -> int:
 
     if args.send:
         telegram = TelegramSettings.from_env()
-        sent_count = send_messages(telegram, messages)
+        jp_telegram = TelegramSettings.jp_from_env()  # 일본 기업 추가 전송 chat (없으면 None)
+        sent_count = 0
+        jp_sent_count = 0
+        # 종목별로 기존 chat에 전송하고, 일본 기업(숫자 티커)은 JP chat에도 추가 전송한다.
+        for result in results:
+            msgs = build_telegram_messages([result])
+            sent_count += send_messages(telegram, msgs)
+            is_japan = str(result.get("ticker", "")).strip().isdigit()
+            if jp_telegram and is_japan:
+                try:
+                    jp_sent_count += send_messages(jp_telegram, msgs)
+                except Exception as exc:  # noqa: BLE001 - JP 전송 실패가 기존 전송을 막지 않도록
+                    log.warning("일본 기업 추가 chat 전송 실패 (%s): %s", result.get("ticker"), exc)
         telegram_status = {
             "sent": True,
             "message_count": len(messages),
             "sent_count": sent_count,
+            "jp_sent_count": jp_sent_count,
             "sent_at": datetime.now().isoformat(),
         }
     else:
