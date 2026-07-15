@@ -410,20 +410,59 @@ def extract_event_date(event: str) -> str:
     return norm(match.group(1)) if match else ""
 
 
-def pick_download_button(row: Locator, preferred_format: str) -> tuple[Locator | None, str]:
+DOC_CLASS = "hui-download-btn-doc"   # WORD
+PDF_CLASS = "hui-download-btn-pdf"   # PDF
+
+# 아시아(일본 등) transcript는 한 행에 언어 세트가 여러 개 있고, 실제 제공되는 세트만
+# display:table-row로 보인다(숨겨진 세트를 클릭하면 다운로드가 안 돼 타임아웃). 라벨로
+# 언어를 구분하고, 영어(ENG-TRANSL/ENG) 우선, 없으면 일본어(JPN, 번역 필요)로 고른다.
+LANG_SETS = [
+    ("ENG-TRANSL", "english", False),
+    ("ENG", "english", False),
+    ("JPN", "japanese", True),
+]
+
+
+def _visible_format_button(scope: Locator, preferred_format: str) -> tuple[Locator | None, str]:
+    """scope 안에서 선호 포맷의 '보이는' 다운로드 버튼을 고른다."""
     normalized = (preferred_format or "word").strip().lower()
     order = ["word", "pdf"] if normalized == "word" else ["pdf", "word"]
-    selectors = {
-        "word": SEL["row_word_button"],
-        "pdf": SEL["row_pdf_button"],
-    }
-
+    class_of = {"word": DOC_CLASS, "pdf": PDF_CLASS}
     for fmt in order:
-        locator = row.locator(selectors[fmt]).first
-        if locator.count():
-            return locator, fmt
-
+        btn = scope.locator(f"a.{class_of[fmt]}").first
+        try:
+            if btn.count() and btn.is_visible():
+                return btn, fmt
+        except Exception:  # noqa: BLE001
+            continue
     return None, ""
+
+
+def pick_download_button(
+    row: Locator, preferred_format: str
+) -> tuple[Locator | None, str, str, bool]:
+    """(버튼, 포맷, 언어, 번역필요)를 반환한다.
+
+    - 언어 세트(SCRIPTS Asia: ENG-TRANSL / JPN 등)가 있으면 영어 우선으로 고른다.
+    - 언어 세트가 없으면(미국 등 영어 원문) 기존처럼 보이는 첫 버튼을 고른다.
+    """
+    # 언어 세트가 있는 행(일본 등): 보이는 세트 div에서 우선순위대로 선택.
+    for label, lang, needs_trans in LANG_SETS:
+        set_div = row.locator(
+            f"xpath=.//div[contains(@style,'table-row')][contains(., '{label}')]"
+        )
+        if not set_div.count():
+            continue
+        btn, fmt = _visible_format_button(set_div.first, preferred_format)
+        if btn is not None:
+            return btn, fmt, lang, needs_trans
+
+    # 언어 세트가 없는 행(영어 원문): 행 전체에서 보이는 첫 버튼.
+    btn, fmt = _visible_format_button(row, preferred_format)
+    if btn is not None:
+        return btn, fmt, "english", False
+
+    return None, "", "english", False
 
 
 def scan_rows(
@@ -469,7 +508,9 @@ def scan_rows(
 
         company, event = extract_company_and_event(row, row_text)
         event_date = extract_event_date(event)
-        download_btn, actual_format = pick_download_button(row, preferred_format)
+        download_btn, actual_format, language, needs_translation = pick_download_button(
+            row, preferred_format
+        )
         if not download_btn:
             log.warning("No downloadable transcript button found for row: %s", row_text)
             continue
@@ -500,12 +541,19 @@ def scan_rows(
             continue
 
         size = dest.stat().st_size
-        log.info("Download completed (%s): %s (%d bytes)", actual_format.upper(), dest.name, size)
+        log.info(
+            "Download completed (%s/%s%s): %s (%d bytes)",
+            actual_format.upper(), language,
+            ", 번역필요" if needs_translation else "",
+            dest.name, size,
+        )
         entry = {
             "company": company,
             "event": event,
             "event_date": normalize_event_date(event_date),
             "format": actual_format,
+            "language": language,
+            "needs_translation": needs_translation,
             "file": str(dest.relative_to(ROOT)),
             "size_bytes": size,
             "downloaded_at": downloaded_at.isoformat(),
