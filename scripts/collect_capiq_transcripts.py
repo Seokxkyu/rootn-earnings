@@ -580,7 +580,7 @@ def open_transcripts_page(page: Page) -> None:
 
     스케줄러가 밤새 유휴 후 실행할 때는 첫 네비게이션이 간헐적으로 실패한다
     (net error / 'Target closed' / 로드 타임아웃). 이럴 때 예외가 그대로 올라가면
-    수집 전체가 exit 1로 죽고, 8:30 실패처럼 로그도 남지 않는다. 지수 백오프로
+    수집 전체가 exit 1로 죽고, 8:30 실패처럼 로그도 남지 않는다. 백오프(5초, 10초)로
     최대 3회 재시도하고, 그래도 실패하면 명확한 메시지로 예외를 올린다.
     """
     last_err: Exception | None = None
@@ -592,7 +592,9 @@ def open_transcripts_page(page: Page) -> None:
         except Exception as exc:  # noqa: BLE001 - 어떤 로드 실패든 재시도 대상
             last_err = exc
             log.warning("Transcripts 페이지 로드 실패 (시도 %d/3): %s", attempt, exc)
-            page.wait_for_timeout(5000)
+            # page.wait_for_timeout은 페이지를 경유하므로 'Target closed'류 실패에서는
+            # 대기 자체가 또 예외를 던져 재시도 루프를 탈출한다. time.sleep을 쓴다.
+            time.sleep(5 * attempt)
     raise RuntimeError(f"Transcripts 페이지 로드가 3회 모두 실패했습니다: {last_err}")
 
 

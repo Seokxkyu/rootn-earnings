@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -87,11 +88,14 @@ def notify_ops(text: str) -> bool:
     return _send(TelegramSettings.from_env(), text)
 
 
-def _tail(text: str, max_chars: int = 600) -> str:
-    text = (text or "").strip()
-    if len(text) <= max_chars:
-        return text
-    return "…" + text[-max_chars:]
+def _alert_detail(stderr: str, max_chars: int = 600) -> str:
+    """실패 알림에 붙일 stderr 꼬리. 내용이 없으면 빈 문자열."""
+    text = (stderr or "").strip()
+    if not text:
+        return ""
+    if len(text) > max_chars:
+        text = "…" + text[-max_chars:]
+    return f"\n{text}"
 
 
 def run_step(name: str, args: list[str]) -> tuple[int, str]:
@@ -108,6 +112,9 @@ def run_step(name: str, args: list[str]) -> tuple[int, str]:
         text=True,
         encoding="utf-8",
         errors="replace",
+        # Windows에서 자식 Python의 파이프 stdio 기본 인코딩은 cp949라서,
+        # 한글 로그/traceback이 위 utf-8 디코드에서 깨진다. utf-8로 강제한다.
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     if result.stdout and result.stdout.strip():
         log.info("[%s stdout]\n%s", name, result.stdout.strip())
@@ -164,9 +171,9 @@ def main() -> int:
         )
         return 3
     if code != 0:
-        tail = _tail(err)
-        detail = f"\n{tail}" if tail else ""
-        notify_alert(f"⚠️ <b>CapIQ 수집 실패</b> (exit {code})\n서버 로그를 확인하세요.{detail}")
+        notify_alert(
+            f"⚠️ <b>CapIQ 수집 실패</b> (exit {code})\n서버 로그를 확인하세요.{_alert_detail(err)}"
+        )
         return code
 
     new_count = read_json_int(LATEST_RUN, "download_count")
@@ -184,11 +191,10 @@ def main() -> int:
     # --- STEP 2: 요약 + 전송 ---
     code, err = run_step("요약·전송", [str(SUMMARY_SCRIPT), "--send"])
     if code != 0:
-        tail = _tail(err)
-        detail = f"\n{tail}" if tail else ""
         notify_alert(
             f"⚠️ <b>요약/전송 실패</b> (exit {code})\n"
-            f"수집은 {new_count}건 완료됐으나 요약 단계에서 실패했습니다. 로그를 확인하세요.{detail}"
+            f"수집은 {new_count}건 완료됐으나 요약 단계에서 실패했습니다. "
+            f"로그를 확인하세요.{_alert_detail(err)}"
         )
         return code
 
