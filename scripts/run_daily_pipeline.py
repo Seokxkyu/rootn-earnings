@@ -87,11 +87,34 @@ def notify_ops(text: str) -> bool:
     return _send(TelegramSettings.from_env(), text)
 
 
-def run_step(name: str, args: list[str]) -> int:
+def _tail(text: str, max_chars: int = 600) -> str:
+    text = (text or "").strip()
+    if len(text) <= max_chars:
+        return text
+    return "…" + text[-max_chars:]
+
+
+def run_step(name: str, args: list[str]) -> tuple[int, str]:
+    """하위 스텝을 실행하고 (종료코드, stderr)를 반환한다.
+
+    stderr를 캡처해 실패 시 파이프라인 로그에 남긴다. 이렇게 하지 않으면
+    수집기가 로깅 설정 전/외에서 크래시할 때 traceback이 통째로 유실된다.
+    """
     log.info("STEP 시작: %s", name)
-    result = subprocess.run([PYTHON, *args], cwd=str(ROOT))
+    result = subprocess.run(
+        [PYTHON, *args],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.stdout and result.stdout.strip():
+        log.info("[%s stdout]\n%s", name, result.stdout.strip())
+    if result.returncode != 0 and result.stderr and result.stderr.strip():
+        log.error("[%s stderr]\n%s", name, result.stderr.strip())
     log.info("STEP 종료: %s (exit %d)", name, result.returncode)
-    return result.returncode
+    return result.returncode, (result.stderr or "")
 
 
 def read_json_int(path, key: str) -> int:
@@ -124,7 +147,7 @@ def main() -> int:
     heartbeat = "--heartbeat" in sys.argv
 
     # --- STEP 1: 수집 ---
-    code = run_step("수집", [str(COLLECT_SCRIPT)])
+    code, err = run_step("수집", [str(COLLECT_SCRIPT)])
     if code == 2:
         notify_alert(
             "⚠️ <b>CapIQ 세션 만료</b>\n"
@@ -141,7 +164,9 @@ def main() -> int:
         )
         return 3
     if code != 0:
-        notify_alert(f"⚠️ <b>CapIQ 수집 실패</b> (exit {code})\n서버 로그를 확인하세요.")
+        tail = _tail(err)
+        detail = f"\n{tail}" if tail else ""
+        notify_alert(f"⚠️ <b>CapIQ 수집 실패</b> (exit {code})\n서버 로그를 확인하세요.{detail}")
         return code
 
     new_count = read_json_int(LATEST_RUN, "download_count")
@@ -157,11 +182,13 @@ def main() -> int:
         return 0
 
     # --- STEP 2: 요약 + 전송 ---
-    code = run_step("요약·전송", [str(SUMMARY_SCRIPT), "--send"])
+    code, err = run_step("요약·전송", [str(SUMMARY_SCRIPT), "--send"])
     if code != 0:
+        tail = _tail(err)
+        detail = f"\n{tail}" if tail else ""
         notify_alert(
             f"⚠️ <b>요약/전송 실패</b> (exit {code})\n"
-            f"수집은 {new_count}건 완료됐으나 요약 단계에서 실패했습니다. 로그를 확인하세요."
+            f"수집은 {new_count}건 완료됐으나 요약 단계에서 실패했습니다. 로그를 확인하세요.{detail}"
         )
         return code
 
