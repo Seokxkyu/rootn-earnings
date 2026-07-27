@@ -84,8 +84,10 @@ def notify_alert(text: str) -> bool:
 
 
 def notify_ops(text: str) -> bool:
-    """정상 운영 상태(완료·heartbeat) 알림 → 기존 요약 봇."""
-    return _send(TelegramSettings.from_env(), text)
+    """정상 운영 상태(완료·heartbeat) 알림 → 운영 채팅(OPS_CHAT_ID→ALERT_CHAT_ID 폴백).
+
+    요약은 채널로 가지만 운영 메시지는 채널에 띄우지 않는다."""
+    return _send(TelegramSettings.ops_from_env(), text)
 
 
 def _alert_detail(stderr: str, max_chars: int = 600) -> str:

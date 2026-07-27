@@ -74,6 +74,25 @@ class TelegramSettings:
         return cls(bot_token=token, chat_id=chat_id)
 
     @classmethod
+    def ops_from_env(cls) -> "TelegramSettings":
+        """운영 상태(완료·heartbeat) 알림용 설정.
+
+        요약이 채널로 가더라도 운영 메시지는 채널을 어지럽히지 않도록
+        OPS_CHAT_ID(없으면 ALERT_CHAT_ID)의 개인/운영 채팅으로 보낸다.
+        둘 다 없으면 요약과 같은 곳(TELEGRAM_CHAT_ID)으로 폴백."""
+        token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+        if not token:
+            raise RuntimeError("Set TELEGRAM_BOT_TOKEN in .env first.")
+        chat_id = (
+            os.getenv("OPS_CHAT_ID", "").strip()
+            or os.getenv("ALERT_CHAT_ID", "").strip()
+            or os.getenv("TELEGRAM_CHAT_ID", "").strip()
+        )
+        if not chat_id:
+            raise RuntimeError("Set OPS_CHAT_ID, ALERT_CHAT_ID, or TELEGRAM_CHAT_ID in .env first.")
+        return cls(bot_token=token, chat_id=chat_id)
+
+    @classmethod
     def alert_from_env(cls) -> "TelegramSettings":
         """장애 알림 전용 봇 설정. ALERT_BOT_TOKEN이 없으면 기본 요약 봇으로 폴백한다.
         ALERT_CHAT_ID가 없으면 요약과 동일한 TELEGRAM_CHAT_ID로 보낸다."""
