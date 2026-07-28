@@ -45,6 +45,45 @@ def summary_md_path(transcript_path: Path) -> Path:
     return SUMMARY_ROOT / transcript_path.parent.name / f"{slugify(transcript_path.stem)}.md"
 
 
+def sent_marker_path(transcript_path: Path) -> Path:
+    """전송 완료 마커 경로. 요약 md와 별개로 '채널 전송 성공'을 기록한다.
+
+    md 존재 = 요약 완료일 뿐 전송 보장이 아니다. 요약과 전송 사이에서
+    프로세스가 죽으면 md만 남는데, 재실행이 이 마커 유무로 미전송분을
+    가려내 전송만 재시도할 수 있다.
+    """
+    md = summary_md_path(transcript_path)
+    return md.parent / (md.name + ".sent")
+
+
+def load_summary_result(path: Path) -> dict:
+    """기존 요약 md에서 전송용 result dict를 복원한다 (미전송 재전송 경로).
+
+    ticker/session 등 메타데이터는 원본 transcript에서 다시 추출한다
+    (로컬 파일 파싱이라 비용이 거의 없다).
+    """
+    md_path = summary_md_path(path)
+    summary = md_path.read_text(encoding="utf-8").strip()
+    transcript_text = load_transcript_text(path)
+    try:
+        display_path = path.relative_to(ROOT)
+    except ValueError:
+        display_path = path
+    return {
+        "file_name": path.name,
+        "source_file": str(display_path),
+        "ticker": extract_ticker(transcript_text),
+        "quarter": extract_quarter(transcript_text),
+        "session": extract_session(transcript_text),
+        "model": "",
+        "source_characters": len(transcript_text),
+        "chunk_count": 0,
+        "summary": summary,
+        "summary_file": str(md_path.relative_to(ROOT)),
+        "summarized_at": datetime.fromtimestamp(md_path.stat().st_mtime).isoformat(),
+    }
+
+
 def summarize_file(settings: GrokSettings, path: Path) -> dict:
     transcript_text = load_transcript_text(path)
     try:

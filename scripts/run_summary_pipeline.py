@@ -20,6 +20,8 @@ import logging
 import sys
 from datetime import datetime
 
+import time
+
 from summary_lib import prompts
 from summary_lib.config import (
     LOG_DIR,
@@ -28,7 +30,12 @@ from summary_lib.config import (
     load_env_file,
 )
 from summary_lib.outputs import write_batch_outputs
-from summary_lib.summarizer import summarize_files, summary_md_path
+from summary_lib.summarizer import (
+    load_summary_result,
+    sent_marker_path,
+    summarize_file,
+    summary_md_path,
+)
 from summary_lib.telegram_client import build_telegram_messages, send_messages
 from summary_lib.transcript_io import select_input_files
 
@@ -71,55 +78,98 @@ def main() -> int:
         log.info("No input transcript files found (input=%s). Nothing to do.", args.input)
         return 0
 
+    def plan_label(path) -> str:
+        md_exists = summary_md_path(path).exists()
+        if args.force or not md_exists:
+            return "SUMMARIZE"
+        if args.send and not sent_marker_path(path).exists():
+            return "RESEND (md exists, unsent)"
+        return "SKIP (already handled)"
+
     log.info("Input source: %s | files: %d", args.input, len(files))
     for path in files:
-        status = "SKIP (summary exists)" if summary_md_path(path).exists() and not args.force else "SUMMARIZE"
-        log.info("  - [%s] %s", status, path.name)
+        log.info("  - [%s] %s", plan_label(path), path.name)
 
     if args.list_only:
         return 0
 
     grok = GrokSettings.from_env()
-    results, skipped = summarize_files(grok, files, force=args.force)
+    telegram = TelegramSettings.from_env() if args.send else None
+    jp_telegram = TelegramSettings.jp_from_env() if args.send else None  # 없으면 None
 
-    if not results:
-        log.info("No new summaries were generated (skipped: %d). Nothing to send.", len(skipped))
+    # 스트리밍 처리: 종목별로 [요약 -> 즉시 전송 -> 전송 마커]를 끝내고 다음으로 넘어간다.
+    # 중간에 죽어도 완료된 종목은 이미 전송돼 있고, 재실행은 마커 없는 것만 이어서 처리한다.
+    # 한 종목의 실패(요약/전송)는 기록만 하고 다음 종목을 계속한다.
+    results: list[dict] = []
+    failures: list[str] = []
+    summarized_count = 0
+    resend_count = 0
+    skipped_count = 0
+    sent_count = 0
+    jp_sent_count = 0
+
+    for idx, path in enumerate(files, start=1):
+        md_path = summary_md_path(path)
+        marker = sent_marker_path(path)
+        try:
+            if md_path.exists() and not args.force:
+                already_sent = marker.exists()
+                if not args.send or already_sent:
+                    log.info("[%d/%d] Skip (이미 처리됨): %s", idx, len(files), path.name)
+                    skipped_count += 1
+                    continue
+                log.info("[%d/%d] 미전송 요약 재전송: %s", idx, len(files), path.name)
+                result = load_summary_result(path)
+                resend_count += 1
+            else:
+                log.info("[%d/%d] Summarizing %s", idx, len(files), path.name)
+                result = summarize_file(grok, path)
+                summarized_count += 1
+                time.sleep(prompts.REQUEST_PAUSE_SEC)
+
+            if args.send:
+                msgs = build_telegram_messages([result])
+                sent_count += send_messages(telegram, msgs)
+                if jp_telegram and str(result.get("ticker", "")).strip().isdigit():
+                    try:
+                        jp_sent_count += send_messages(jp_telegram, msgs)
+                    except Exception as exc:  # noqa: BLE001 - JP 전송 실패가 기본 전송을 막지 않도록
+                        log.warning("일본 기업 추가 chat 전송 실패 (%s): %s", result.get("ticker"), exc)
+                marker.write_text(datetime.now().isoformat(), encoding="utf-8")
+                log.info("[%d/%d] 전송 완료: %s", idx, len(files), path.name)
+            results.append(result)
+        except Exception:  # noqa: BLE001 - 한 종목 실패가 배치 전체를 죽이지 않도록
+            log.exception("[%d/%d] 처리 실패: %s", idx, len(files), path.name)
+            failures.append(path.name)
+            continue
+
+    if not results and not failures:
+        log.info("No work to do (skipped: %d). Nothing to send.", skipped_count)
         return 0
 
-    messages = build_telegram_messages(results)
-    telegram_status: dict = {"sent": False, "message_count": len(messages)}
-
     if args.send:
-        telegram = TelegramSettings.from_env()
-        jp_telegram = TelegramSettings.jp_from_env()  # 일본 기업 추가 전송 chat (없으면 None)
-        sent_count = 0
-        jp_sent_count = 0
-        # 종목별로 기존 chat에 전송하고, 일본 기업(숫자 티커)은 JP chat에도 추가 전송한다.
-        for result in results:
-            msgs = build_telegram_messages([result])
-            sent_count += send_messages(telegram, msgs)
-            is_japan = str(result.get("ticker", "")).strip().isdigit()
-            if jp_telegram and is_japan:
-                try:
-                    jp_sent_count += send_messages(jp_telegram, msgs)
-                except Exception as exc:  # noqa: BLE001 - JP 전송 실패가 기존 전송을 막지 않도록
-                    log.warning("일본 기업 추가 chat 전송 실패 (%s): %s", result.get("ticker"), exc)
-        telegram_status = {
+        telegram_status: dict = {
             "sent": True,
-            "message_count": len(messages),
+            "message_count": sent_count,
             "sent_count": sent_count,
             "jp_sent_count": jp_sent_count,
             "sent_at": datetime.now().isoformat(),
         }
     else:
+        messages = build_telegram_messages(results)
+        telegram_status = {"sent": False, "message_count": len(messages)}
         log.info("Dry run: %d Telegram message(s) built but not sent. Use --send to send.", len(messages))
 
-    json_path, csv_path = write_batch_outputs(results, telegram_status=telegram_status)
-    log.info("Batch outputs: %s | %s", json_path, csv_path)
+    if results:
+        json_path, csv_path = write_batch_outputs(results, telegram_status=telegram_status)
+        log.info("Batch outputs: %s | %s", json_path, csv_path)
     log.info(
-        "Done. summarized=%d skipped=%d telegram_sent=%s",
-        len(results), len(skipped), telegram_status.get("sent"),
+        "Done. summarized=%d resent=%d skipped=%d failed=%d telegram_sent=%s",
+        summarized_count, resend_count, skipped_count, len(failures), telegram_status.get("sent"),
     )
+    if failures:
+        log.error("실패 종목 %d건: %s", len(failures), ", ".join(failures))
+        return 1
     return 0
 
 
