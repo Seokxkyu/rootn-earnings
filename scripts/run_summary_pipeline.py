@@ -39,6 +39,10 @@ from summary_lib.summarizer import (
 from summary_lib.telegram_client import build_telegram_messages, send_messages
 from summary_lib.transcript_io import select_input_files
 
+# 일본 기업이지만 미국 기업과 동일하게 단체 채팅방에만 전송할 기업 (JP 방 추가 전송 제외).
+# 파일명(회사명) 부분 일치, 소문자 비교.
+JP_EXTRA_SEND_EXCLUDE = ("kioxia", "murata")
+
 log = logging.getLogger("summary")
 
 
@@ -130,7 +134,12 @@ def main() -> int:
             if args.send:
                 msgs = build_telegram_messages([result])
                 sent_count += send_messages(telegram, msgs)
-                if jp_telegram and str(result.get("ticker", "")).strip().isdigit():
+                is_jp = str(result.get("ticker", "")).strip().isdigit()
+                jp_excluded = any(
+                    name in str(result.get("file_name", "")).lower()
+                    for name in JP_EXTRA_SEND_EXCLUDE
+                )
+                if jp_telegram and is_jp and not jp_excluded:
                     try:
                         jp_sent_count += send_messages(jp_telegram, msgs)
                     except Exception as exc:  # noqa: BLE001 - JP 전송 실패가 기본 전송을 막지 않도록
