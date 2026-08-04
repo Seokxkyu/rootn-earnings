@@ -23,6 +23,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from summary_lib.metadata import extract_ticker
+from summary_lib.transcript_io import load_transcript_text
+
 ROOT = Path(__file__).resolve().parent.parent
 TRANSCRIPT_DIR = ROOT / "transcripts"
 LEDGER = ROOT / "output" / "gdrive_uploaded.txt"
@@ -48,11 +51,33 @@ def setup_logging() -> None:
     )
 
 
-def company_folder(file_name: str) -> str:
-    """파일명에서 회사명 추출: '<회사명>_Earnings Call_...' 형식."""
-    name = Path(file_name).stem
-    company = name.split("_Earnings Call")[0].strip()
-    return company or "_unclassified"
+_folder_cache: dict[str, str] = {}
+
+# 본문 티커 추출이 빗나가는 회사의 수동 보정 (회사명 → 티커).
+# 추출 규칙이 커버 못 하는 거래소(밀라노 등)나 헤더에 티커가 없는 transcript용.
+TICKER_OVERRIDES = {
+    "Prysmian S.p.A.": "PRY",
+    "MediaTek Inc.": "2454",
+}
+
+
+def company_folder(path: Path) -> str:
+    """'회사명 (티커)' 폴더명. 회사명은 파일명에서, 티커는 transcript 본문에서 추출.
+
+    티커를 못 뽑으면 회사명만 쓴다. 같은 회사는 캐시로 일관된 폴더명을 보장한다.
+    """
+    company = path.stem.split("_Earnings Call")[0].strip() or "_unclassified"
+    if company in _folder_cache:
+        return _folder_cache[company]
+    ticker = TICKER_OVERRIDES.get(company, "")
+    if not ticker:
+        try:
+            ticker = extract_ticker(load_transcript_text(path))
+        except Exception as exc:  # noqa: BLE001 - 티커 추출 실패가 업로드를 막지 않도록
+            log.warning("티커 추출 실패 (%s): %s", path.name, exc)
+    folder = f"{company} ({ticker})" if ticker and ticker != "확인 불가" else company
+    _folder_cache[company] = folder
+    return folder
 
 
 def load_ledger() -> set[str]:
@@ -101,7 +126,7 @@ def main() -> int:
     fail_count = 0
     for path in pending:
         rel = str(path.relative_to(ROOT))
-        dest = f"{REMOTE_BASE}/{company_folder(path.name)}"
+        dest = f"{REMOTE_BASE}/{company_folder(path)}"
         try:
             if rclone_copy(path, dest):
                 append_ledger(rel)
