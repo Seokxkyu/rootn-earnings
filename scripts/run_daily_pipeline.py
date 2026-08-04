@@ -53,6 +53,7 @@ log = logging.getLogger("pipeline")
 PYTHON = sys.executable
 COLLECT_SCRIPT = ROOT / "scripts" / "collect_capiq_transcripts.py"
 SUMMARY_SCRIPT = ROOT / "scripts" / "run_summary_pipeline.py"
+GDRIVE_SCRIPT = ROOT / "scripts" / "upload_transcripts_gdrive.py"
 LATEST_RUN = RUNS_DIR / "latest.json"
 LATEST_BATCH = SUMMARY_ROOT / "latest_batch.json"
 
@@ -142,6 +143,16 @@ def read_json_int(path, key: str) -> int:
         return 0
 
 
+def upload_gdrive() -> None:
+    """transcript를 구글드라이브 종목별 폴더로 업로드. 실패는 알림만 하고 진행."""
+    code, err = run_step("Drive 업로드", [str(GDRIVE_SCRIPT)])
+    if code != 0:
+        notify_alert(
+            f"⚠️ <b>구글드라이브 업로드 실패</b> (exit {code})\n"
+            f"수집·전송은 정상. 실패분은 다음 회차에 자동 재시도됩니다.{_alert_detail(err)}"
+        )
+
+
 def main() -> int:
     load_env_file()
     setup_logging()
@@ -183,6 +194,7 @@ def main() -> int:
 
     if new_count == 0:
         log.info("신규 transcript 없음. 요약·전송 단계 생략.")
+        upload_gdrive()  # 이전 회차 업로드 실패분 재시도
         if heartbeat:
             notify_ops(
                 f"🤖 <b>CapIQ 파이프라인</b>\n"
@@ -200,7 +212,10 @@ def main() -> int:
         )
         return code
 
-    # --- STEP 3: 완료 알림 (정상 운영 → 요약 봇) ---
+    # --- STEP 3: 구글드라이브 업로드 (실패해도 파이프라인은 성공 처리) ---
+    upload_gdrive()
+
+    # --- STEP 4: 완료 알림 (정상 운영 → 요약 봇) ---
     sent = read_json_int(LATEST_BATCH, "summary_count")
     elapsed = (datetime.now() - started).total_seconds()
     notify_ops(
