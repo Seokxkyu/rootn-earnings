@@ -133,17 +133,18 @@ def main() -> int:
 
             if args.send:
                 msgs = build_telegram_messages([result])
-                sent_count += send_messages(telegram, msgs)
                 is_jp = str(result.get("ticker", "")).strip().isdigit()
                 jp_excluded = any(
                     name in str(result.get("file_name", "")).lower()
                     for name in JP_EXTRA_SEND_EXCLUDE
                 )
+                # 일본 기업(숫자 티커)은 일본방에만 보낸다. 단 JP_EXTRA_SEND_EXCLUDE
+                # (kioxia, murata)는 미국 기업과 동일하게 Earnings방에만 보낸다.
+                # 일본방이 미설정이면 일본 기업도 Earnings방으로 폴백.
                 if jp_telegram and is_jp and not jp_excluded:
-                    try:
-                        jp_sent_count += send_messages(jp_telegram, msgs)
-                    except Exception as exc:  # noqa: BLE001 - JP 전송 실패가 기본 전송을 막지 않도록
-                        log.warning("일본 기업 추가 chat 전송 실패 (%s): %s", result.get("ticker"), exc)
+                    jp_sent_count += send_messages(jp_telegram, msgs)
+                else:
+                    sent_count += send_messages(telegram, msgs)
                 marker.write_text(datetime.now().isoformat(), encoding="utf-8")
                 log.info("[%d/%d] 전송 완료: %s", idx, len(files), path.name)
             results.append(result)
