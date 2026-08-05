@@ -20,53 +20,56 @@ log = logging.getLogger("qa_bot")
 
 
 RESOLVE_SYSTEM = (
-    "너는 사용자 질문이 어느 상장 기업에 관한 것인지 판별하는 분류기다. "
-    "반드시 '보유 기업 목록'에 있는 회사명 중에서만 하나를 고른다. "
+    "너는 사용자 질문이 어느 상장 기업(들)에 관한 것인지 판별하는 분류기다. "
+    "반드시 '보유 기업 목록'에 있는 회사명 중에서만 고른다. 비교 질문이면 여러 개를 "
+    "골라도 된다(최대 4개, 쉼표로 구분해 한 줄로). "
     "질문이 목록의 어느 기업과도 무관하거나 특정할 수 없으면 정확히 NONE 이라고만 답한다. "
-    "설명 없이 회사명 한 줄 또는 NONE 만 출력한다."
+    "설명 없이 회사명(들) 한 줄 또는 NONE 만 출력한다."
 )
 
 
-def resolve_company(settings: GrokSettings, question: str, companies: list[str]) -> str | None:
-    """질문에서 대상 기업을 고른다. 목록에 없으면 None.
+def resolve_companies(settings: GrokSettings, question: str, companies: list[str]) -> list[str]:
+    """질문에서 대상 기업(들)을 고른다. 목록에 없으면 빈 리스트. 최대 4개.
 
-    먼저 코드로 명백한 매칭(정확한 회사명·티커 부분일치)을 시도하고,
-    실패 시에만 LLM에 목록을 후보로 주고 고르게 한다(닫힌 목록이라 환각 차단).
+    먼저 코드로 명백한 매칭(회사명 토큰이 질문에 그대로 등장)을 전부 수집하고,
+    하나도 없을 때만 LLM에 목록을 후보로 주고 고르게 한다(닫힌 목록이라 환각 차단).
     """
     q = question.strip()
-    # 1) 코드 즉시 매칭: 회사명 토큰이 질문에 그대로 들어있으면 바로 확정.
+    # 1) 코드 즉시 매칭: 질문에 이름이 그대로 들어있는 회사를 전부 수집(비교 질문 대응).
     lowered = q.lower()
+    matched: list[str] = []
     for name in companies:
         core = re.split(r",|\bInc\b|\bCorp|\bCorporation|\bCo\b|\bLtd|\bplc|\bHoldings|\bGroup",
                         name)[0].strip().lower()
         if core and len(core) >= 3 and core in lowered:
-            return name
+            matched.append(name)
+    if matched:
+        return matched[:4]
 
-    # 2) LLM 판별.
+    # 2) LLM 판별 (쉼표 구분 복수 허용).
     if not companies:
-        return None
+        return []
     listing = "\n".join(f"- {c}" for c in companies)
-    prompt = f"[보유 기업 목록]\n{listing}\n\n[사용자 질문]\n{q}\n\n[정답: 회사명 또는 NONE]"
+    prompt = f"[보유 기업 목록]\n{listing}\n\n[사용자 질문]\n{q}\n\n[정답: 회사명(들) 또는 NONE]"
     try:
         answer = call_grok(
             settings,
             system_prompt=RESOLVE_SYSTEM,
             user_prompt=prompt,
-            max_output_tokens=40,
+            max_output_tokens=120,
         ).strip()
     except Exception as exc:  # noqa: BLE001
         log.warning("종목 인식 LLM 실패: %s", exc)
-        return None
+        return []
     if not answer or answer.upper() == "NONE":
-        return None
-    # LLM이 목록 밖 문자열을 반환하면 가장 가까운 항목으로만 인정(엄격).
-    if answer in companies:
-        return answer
-    for c in companies:
-        if c.lower() == answer.lower():
-            return c
-    log.warning("종목 인식 결과가 목록 밖: %r", answer)
-    return None
+        return []
+    # 회사명에 쉼표가 포함되므로(예: 'Advanced Micro Devices, Inc.') 쉼표 분리는
+    # 불가. 대신 목록의 각 회사명이 LLM 답변 문자열에 등장하는지로 매칭한다.
+    low = answer.lower()
+    picked = [c for c in companies if c.lower() in low]
+    if not picked:
+        log.warning("종목 인식 결과가 목록과 불일치: %r", answer)
+    return picked[:4]
 
 
 KEYWORD_SYSTEM = (
@@ -108,7 +111,10 @@ def answer_question(
     company: str,
     contexts: list[tuple[str, str]],
 ) -> str:
-    """근거(발췌) 기반 답변 생성. contexts = [(출처라벨, 본문청크), ...]."""
+    """근거(발췌) 기반 답변 생성. contexts = [(출처라벨, 본문청크), ...].
+
+    company는 복수 기업이면 'A, B' 형태 문자열. 비교 질문도 같은 경로로 처리된다.
+    """
     if not contexts:
         return f"{company} 관련 transcript는 있으나 질문과 맞는 근거를 찾지 못했습니다."
     joined = "\n\n".join(f"[근거 {i+1} · {label}]\n{body}" for i, (label, body) in enumerate(contexts))

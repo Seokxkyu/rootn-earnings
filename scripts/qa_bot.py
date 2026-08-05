@@ -118,19 +118,24 @@ def handle_question(grok: GrokSettings, question: str) -> str:
     if not docs:
         return "아직 수집된 transcript가 없습니다."
     companies = corpus.company_list(docs)
-    company = llm.resolve_company(grok, question, companies)
-    if not company:
+    picked = llm.resolve_companies(grok, question, companies)
+    if not picked:
         return (
             "질문에서 대상 기업을 특정하지 못했습니다. "
             "회사명이나 티커를 넣어 다시 물어봐 주세요.\n"
             f"(현재 보유 기업 {len(companies)}곳)"
         )
-    target = corpus.docs_for_company(docs, company)
     keywords = llm.extract_keywords(grok, question)
-    contexts = retriever.search(target, question, top_k=5, extra_terms=keywords)
-    answer = llm.answer_question(grok, question, company, contexts)
-    srcs = ", ".join(sorted({label for label, _ in contexts}))
-    return f"🏢 {company}\n\n{answer}\n\n— 근거: {srcs}"
+    # 복수 기업이면 기업별로 검색해 근거를 합친다(기업당 top-k를 나눠 균형 유지).
+    per_k = max(2, 5 // len(picked)) if len(picked) > 1 else 5
+    contexts: list[tuple[str, str]] = []
+    for company in picked:
+        target = corpus.docs_for_company(docs, company)
+        contexts.extend(retriever.search(target, question, top_k=per_k, extra_terms=keywords))
+    label = ", ".join(picked)
+    answer = llm.answer_question(grok, question, label, contexts)
+    srcs = ", ".join(sorted({lb for lb, _ in contexts}))
+    return f"🏢 {label}\n\n{answer}\n\n— 근거: {srcs}"
 
 
 def run_once(question: str) -> None:
