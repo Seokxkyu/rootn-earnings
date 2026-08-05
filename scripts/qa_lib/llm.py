@@ -1,0 +1,126 @@
+"""Q&A용 LLM 호출 (Grok). 종목 인식과 답변 생성 두 가지.
+
+기존 summary_lib.grok_client / GrokSettings를 재사용한다. LLM 교체 시 이 파일만
+바꾸면 되도록 봇·검색 로직과 분리한다.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from pathlib import Path
+
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from summary_lib.config import GrokSettings  # noqa: E402
+from summary_lib.grok_client import call_grok  # noqa: E402
+
+log = logging.getLogger("qa_bot")
+
+
+RESOLVE_SYSTEM = (
+    "너는 사용자 질문이 어느 상장 기업에 관한 것인지 판별하는 분류기다. "
+    "반드시 '보유 기업 목록'에 있는 회사명 중에서만 하나를 고른다. "
+    "질문이 목록의 어느 기업과도 무관하거나 특정할 수 없으면 정확히 NONE 이라고만 답한다. "
+    "설명 없이 회사명 한 줄 또는 NONE 만 출력한다."
+)
+
+
+def resolve_company(settings: GrokSettings, question: str, companies: list[str]) -> str | None:
+    """질문에서 대상 기업을 고른다. 목록에 없으면 None.
+
+    먼저 코드로 명백한 매칭(정확한 회사명·티커 부분일치)을 시도하고,
+    실패 시에만 LLM에 목록을 후보로 주고 고르게 한다(닫힌 목록이라 환각 차단).
+    """
+    q = question.strip()
+    # 1) 코드 즉시 매칭: 회사명 토큰이 질문에 그대로 들어있으면 바로 확정.
+    lowered = q.lower()
+    for name in companies:
+        core = re.split(r",|\bInc\b|\bCorp|\bCorporation|\bCo\b|\bLtd|\bplc|\bHoldings|\bGroup",
+                        name)[0].strip().lower()
+        if core and len(core) >= 3 and core in lowered:
+            return name
+
+    # 2) LLM 판별.
+    if not companies:
+        return None
+    listing = "\n".join(f"- {c}" for c in companies)
+    prompt = f"[보유 기업 목록]\n{listing}\n\n[사용자 질문]\n{q}\n\n[정답: 회사명 또는 NONE]"
+    try:
+        answer = call_grok(
+            settings,
+            system_prompt=RESOLVE_SYSTEM,
+            user_prompt=prompt,
+            max_output_tokens=40,
+        ).strip()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("종목 인식 LLM 실패: %s", exc)
+        return None
+    if not answer or answer.upper() == "NONE":
+        return None
+    # LLM이 목록 밖 문자열을 반환하면 가장 가까운 항목으로만 인정(엄격).
+    if answer in companies:
+        return answer
+    for c in companies:
+        if c.lower() == answer.lower():
+            return c
+    log.warning("종목 인식 결과가 목록 밖: %r", answer)
+    return None
+
+
+KEYWORD_SYSTEM = (
+    "너는 검색어 추출기다. 사용자 질문을 영어 어닝콜 transcript에서 찾기 위한 "
+    "핵심 검색어를 뽑는다. 한국어 질문이면 영어로 번역한 핵심 명사·고유명사를 낸다. "
+    "제품명·세그먼트·재무용어 위주로 3~8개, 쉼표로만 구분해 한 줄로 출력한다. "
+    "예: 'iPhone, Services, revenue, gross margin, China'."
+)
+
+
+def extract_keywords(settings: GrokSettings, question: str) -> list[str]:
+    """질문에서 영어 transcript 검색용 키워드를 뽑는다(한→영 포함). 실패 시 빈 리스트."""
+    try:
+        raw = call_grok(
+            settings,
+            system_prompt=KEYWORD_SYSTEM,
+            user_prompt=question.strip(),
+            max_output_tokens=60,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("키워드 추출 실패: %s", exc)
+        return []
+    return [t.strip() for t in re.split(r"[,\n]", raw) if t.strip()]
+
+
+ANSWER_SYSTEM = (
+    "너는 어닝콜 transcript를 근거로 투자자 질문에 답하는 리서치 어시스턴트다. "
+    "규칙:\n"
+    "- 제공된 transcript 발췌(근거)에 있는 내용만으로 답한다. 추측·외부지식 금지.\n"
+    "- 근거에 없으면 '제공된 transcript에서 확인되지 않습니다'라고 명시한다.\n"
+    "- 숫자·발언을 인용할 때 어느 분기/발표일 자료인지 밝힌다.\n"
+    "- 한국어로 간결하게. 핵심부터. 필요시 bullet."
+)
+
+
+def answer_question(
+    settings: GrokSettings,
+    question: str,
+    company: str,
+    contexts: list[tuple[str, str]],
+) -> str:
+    """근거(발췌) 기반 답변 생성. contexts = [(출처라벨, 본문청크), ...]."""
+    if not contexts:
+        return f"{company} 관련 transcript는 있으나 질문과 맞는 근거를 찾지 못했습니다."
+    joined = "\n\n".join(f"[근거 {i+1} · {label}]\n{body}" for i, (label, body) in enumerate(contexts))
+    prompt = (
+        f"[대상 기업]\n{company}\n\n"
+        f"[transcript 발췌]\n{joined}\n\n"
+        f"[질문]\n{question.strip()}\n\n"
+        f"[답변]"
+    )
+    return call_grok(
+        settings,
+        system_prompt=ANSWER_SYSTEM,
+        user_prompt=prompt,
+        max_output_tokens=1200,
+    ).strip()
