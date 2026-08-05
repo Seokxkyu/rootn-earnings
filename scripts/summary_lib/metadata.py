@@ -8,7 +8,7 @@ from .transcript_io import norm
 # CapIQ transcript 상단에 나오는 거래소 접두 티커.
 # 미국은 알파벳(NasdaqGS:PEP), 일본/아시아는 숫자(TSE:4443)이므로 티커는 영숫자 시작을 허용한다.
 EXCHANGE_TICKER_RE = re.compile(
-    r"\b(?:NYSE|NYSEAM|NasdaqGS|NasdaqGM|NasdaqCM|Nasdaq|AMEX|OTCPK|OTCQX|OTCQB|"
+    r"\b(NYSE|NYSEAM|NasdaqGS|NasdaqGM|NasdaqCM|Nasdaq|AMEX|OTCPK|OTCQX|OTCQB|"
     r"TSX|TSXV|LSE|AIM|ENXTPA|ENXTAM|ENXTBR|XTRA|SWX|SEHK|TSE|TSEC|KOSE|KOSDAQ|ASX|BSE|NSEI)"
     r"\s*:\s*([A-Z0-9][A-Z0-9.]{0,7})\b"
 )
@@ -19,9 +19,19 @@ def extract_ticker(text: str) -> str:
     head = text[:4000]
     match = EXCHANGE_TICKER_RE.search(head) or EXCHANGE_TICKER_RE.search(text)
     if match:
-        return match.group(1)
+        return match.group(2)
     match = FALLBACK_TICKER_RE.search(text)
     return match.group(1) if match else "확인 불가"
+
+
+def extract_exchange(text: str) -> str:
+    """헤더의 거래소 코드(TSE, NasdaqGS, TSEC 등). 못 찾으면 빈 문자열.
+
+    일본 기업 판정은 '티커가 숫자인가'가 아니라 이 값이 TSE(도쿄)인지로 한다 —
+    대만(TSEC)·홍콩(SEHK)·중국 티커도 숫자라서 숫자 판정은 오분류를 만든다."""
+    head = text[:4000]
+    match = EXCHANGE_TICKER_RE.search(head) or EXCHANGE_TICKER_RE.search(text)
+    return match.group(1) if match else ""
 
 
 # 회사명 라인은 대개 법인 접미사로 끝난다. 헤더 상단에서 이 패턴 라인을 회사명으로 본다.

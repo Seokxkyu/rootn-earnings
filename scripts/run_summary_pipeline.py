@@ -133,7 +133,9 @@ def main() -> int:
 
             if args.send:
                 msgs = build_telegram_messages([result])
-                is_jp = str(result.get("ticker", "")).strip().isdigit()
+                # 일본 판정: 거래소 코드가 TSE(도쿄)인 경우만. 숫자 티커 판정은
+                # 대만(TSEC)·홍콩(SEHK) 기업을 일본으로 오분류하므로 쓰지 않는다.
+                is_jp = str(result.get("exchange", "")).strip() == "TSE"
                 jp_excluded = any(
                     name in str(result.get("file_name", "")).lower()
                     for name in JP_EXTRA_SEND_EXCLUDE

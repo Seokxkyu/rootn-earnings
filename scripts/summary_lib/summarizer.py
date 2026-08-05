@@ -9,6 +9,7 @@ from . import prompts
 from .config import ROOT, SUMMARY_ROOT, GrokSettings
 from .grok_client import call_grok
 from .metadata import (
+    extract_exchange,
     extract_metadata_block,
     extract_quarter,
     extract_session,
@@ -73,6 +74,7 @@ def load_summary_result(path: Path) -> dict:
         "file_name": path.name,
         "source_file": str(display_path),
         "ticker": extract_ticker(transcript_text),
+        "exchange": extract_exchange(transcript_text),
         "quarter": extract_quarter(transcript_text),
         "session": extract_session(transcript_text),
         "model": "",
@@ -141,6 +143,7 @@ def summarize_file(settings: GrokSettings, path: Path) -> dict:
         "file_name": path.name,
         "source_file": str(display_path),
         "ticker": ticker,
+        "exchange": extract_exchange(transcript_text),
         "quarter": quarter,
         "session": session,
         "model": settings.model,
