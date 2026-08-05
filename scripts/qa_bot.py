@@ -60,6 +60,54 @@ def tg(token: str, method: str, **params) -> dict:
         return json.load(r)
 
 
+def _is_table_line(line: str) -> bool:
+    s = line.strip()
+    return s.startswith("|") and s.endswith("|") and s.count("|") >= 3
+
+
+def _split_row(line: str) -> list[str]:
+    cells = [c.strip() for c in line.strip().strip("|").split("|")]
+    return [re.sub(r"<br\s*/?>", "; ", c) for c in cells]
+
+
+def _is_separator(cells: list[str]) -> bool:
+    return all(re.fullmatch(r":?-{2,}:?", c or "") for c in cells if c != "")
+
+
+def flatten_markdown_tables(text: str) -> str:
+    """마크다운 표를 항목별 목록으로 변환.
+
+    텔레그램은 표를 렌더하지 못해 파이프가 그대로 노출된다. 비교표는
+    '행 이름'을 소제목으로 두고 '열 이름: 값' bullet으로 펴면 모바일에서도 읽힌다.
+    """
+    lines = text.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        if not _is_table_line(lines[i]):
+            out.append(lines[i])
+            i += 1
+            continue
+        block = []
+        while i < len(lines) and _is_table_line(lines[i]):
+            block.append(_split_row(lines[i]))
+            i += 1
+        rows = [r for r in block if not _is_separator(r)]
+        if len(rows) < 2:
+            out.extend("| " + " | ".join(r) + " |" for r in rows)
+            continue
+        header, body = rows[0], rows[1:]
+        for row in body:
+            label = row[0] if row else ""
+            if label:
+                out.append(f"**{label}**")
+            for col_name, value in zip(header[1:], row[1:]):
+                if value:
+                    out.append(f"- {col_name}: {value}")
+            out.append("")
+    return "\n".join(out)
+
+
 def md_to_telegram_html(text: str) -> str:
     """Grok이 내는 마크다운을 텔레그램 HTML(parse_mode=HTML)로 변환.
 
@@ -67,7 +115,7 @@ def md_to_telegram_html(text: str) -> str:
     정리한다. 먼저 HTML 특수문자를 이스케이프한 뒤 서식만 태그로 되살린다.
     """
     out_lines = []
-    for line in text.split("\n"):
+    for line in flatten_markdown_tables(text).split("\n"):
         s = html.escape(line)
         # ### 헤더 → 굵게 (마커 제거)
         m = re.match(r"\s*#{1,6}\s+(.*)", s)
