@@ -22,11 +22,29 @@ def slugify(value: str) -> str:
     return value or "unknown"
 
 
+# CapIQ transcript는 한 문단 안에서 <w:br/>로 줄을 나눈다. python-docx의
+# paragraph.text는 이 br을 무시하고 run을 그대로 이어붙여 단어·숫자가 붙어버린다
+# ("reflectgrowing", "$193million"). 검색·요약 정확도를 해치므로 br/tab을 공백으로
+# 치환해 직접 추출한다.
+_W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def _paragraph_text(paragraph) -> str:
+    parts: list[str] = []
+    for node in paragraph._p.iter():
+        tag = node.tag
+        if tag == _W_NS + "t":
+            parts.append(node.text or "")
+        elif tag in (_W_NS + "br", _W_NS + "cr", _W_NS + "tab"):
+            parts.append(" ")
+    return "".join(parts)
+
+
 def read_docx_text(path: Path) -> str:
     from docx import Document
 
     document = Document(path)
-    lines = [norm(paragraph.text) for paragraph in document.paragraphs]
+    lines = [norm(_paragraph_text(paragraph)) for paragraph in document.paragraphs]
     return "\n".join(line for line in lines if line)
 
 

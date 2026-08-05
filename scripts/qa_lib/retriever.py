@@ -6,6 +6,7 @@ MVP는 임베딩 없이 키워드 점수(용어 빈도 + 근접) 기반. 한 기
 
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 
@@ -41,6 +42,17 @@ def _score(chunk: str, terms: list[str]) -> int:
     return sum(low.count(t) for t in terms)
 
 
+def _idf_weights(entries: list[tuple[str, str, str]], terms: set[str]) -> dict[str, float]:
+    """희소한 용어에 큰 가중치. 회사명처럼 모든 청크에 나오는 흔한 말이 점수를
+    지배해 정작 결정적인 문구('total revenue')를 밀어내는 것을 막는다."""
+    n = len(entries)
+    weights: dict[str, float] = {}
+    for t in terms:
+        df = sum(1 for _, _, low in entries if t in low)
+        weights[t] = math.log(1 + n / df) if df else 0.0
+    return weights
+
+
 def search(
     docs: list[Doc],
     question: str,
@@ -52,17 +64,23 @@ def search(
     extra_terms는 한→영 변환 등 LLM이 뽑은 검색어(영어 transcript 매칭용).
     질문 용어가 하나도 안 걸리면 각 문서 앞부분(개요)을 폴백으로 준다.
     """
-    terms = _terms(question) + [t.lower() for t in (extra_terms or [])]
-    scored: list[tuple[int, str, str]] = []
+    terms = set(_terms(question) + [t.lower() for t in (extra_terms or [])])
+    entries: list[tuple[str, str, str]] = []  # (label, 원문청크, 소문자청크)
     for d in docs:
         try:
             text = load_transcript_text(d.path)
         except Exception:
             continue
         for ch in _chunks(text):
-            s = _score(ch, terms) if terms else 0
+            entries.append((d.label, ch, ch.lower()))
+
+    scored: list[tuple[float, str, str]] = []
+    if entries and terms:
+        weights = _idf_weights(entries, terms)
+        for label, ch, low in entries:
+            s = sum(low.count(t) * weights[t] for t in terms if weights[t])
             if s > 0:
-                scored.append((s, d.label, ch))
+                scored.append((s, label, ch))
     scored.sort(key=lambda x: x[0], reverse=True)
     if scored:
         return [(label, body) for _, label, body in scored[:top_k]]
