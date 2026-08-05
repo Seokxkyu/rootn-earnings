@@ -177,8 +177,14 @@ def run_daemon() -> None:
             continue
         for upd in resp.get("result", []):
             offset = upd["update_id"] + 1
+            # 수신 전량을 원문으로 기록: "메시지가 왔는데 무시됐는지 / 아예 안 왔는지"를
+            # 로그만으로 판정하기 위함. (진단용 수동 getUpdates는 메시지를 파괴하므로 금지)
+            log.info("RAW update: %s", json.dumps(upd, ensure_ascii=False)[:800])
             msg = upd.get("message") or upd.get("channel_post") or {}
             chat = msg.get("chat") or {}
+            if msg.get("migrate_to_chat_id"):
+                log.warning("★그룹이 supergroup으로 전환됨: %s → %s (.env chat_id 갱신 필요)",
+                            chat.get("id"), msg["migrate_to_chat_id"])
             question = parse_ask(msg.get("text", ""))
             if not question:
                 continue
