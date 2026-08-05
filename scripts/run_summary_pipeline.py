@@ -98,7 +98,8 @@ def main() -> int:
         return 0
 
     grok = GrokSettings.from_env()
-    telegram = TelegramSettings.from_env() if args.send else None
+    # 비일본 요약 수신자: 기본 채널 + EARNINGS_EXTRA_CHAT_IDS(단체방 등). 복수 지원.
+    telegram_targets = TelegramSettings.summary_targets_from_env() if args.send else []
     jp_telegram = TelegramSettings.jp_from_env() if args.send else []  # 미설정이면 빈 리스트
 
     # 스트리밍 처리: 종목별로 [요약 -> 즉시 전송 -> 전송 마커]를 끝내고 다음으로 넘어간다.
@@ -154,7 +155,15 @@ def main() -> int:
                         raise RuntimeError("일본 수신자 전원 전송 실패")
                     jp_sent_count += jp_ok
                 else:
-                    sent_count += send_messages(telegram, msgs)
+                    main_ok = 0
+                    for tgt in telegram_targets:
+                        try:
+                            main_ok += send_messages(tgt, msgs)
+                        except Exception as exc:  # noqa: BLE001 - 수신자 1명 실패가 나머지를 막지 않도록
+                            log.warning("요약 chat %s 전송 실패: %s", tgt.chat_id, exc)
+                    if main_ok == 0:
+                        raise RuntimeError("요약 수신자 전원 전송 실패")
+                    sent_count += main_ok
                 marker.write_text(datetime.now().isoformat(), encoding="utf-8")
                 log.info("[%d/%d] 전송 완료: %s", idx, len(files), path.name)
             results.append(result)

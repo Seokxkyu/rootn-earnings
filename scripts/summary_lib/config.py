@@ -62,6 +62,24 @@ class TelegramSettings:
         return cls(bot_token=token, chat_id=chat_id)
 
     @classmethod
+    def summary_targets_from_env(cls) -> "list[TelegramSettings]":
+        """비(非)일본 요약을 보낼 수신자 목록.
+
+        기본 채널(TELEGRAM_CHAT_ID) + EARNINGS_EXTRA_CHAT_IDS(쉼표 구분, 선택).
+        추가 수신자는 같은 요약 봇(TELEGRAM_BOT_TOKEN)으로 보낸다."""
+        token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+        chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+        if not token or not chat_id:
+            raise RuntimeError("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env first.")
+        targets = [cls(bot_token=token, chat_id=chat_id)]
+        extra = os.getenv("EARNINGS_EXTRA_CHAT_IDS", "").strip()
+        for part in extra.split(","):
+            cid = part.strip()
+            if cid and cid != chat_id:
+                targets.append(cls(bot_token=token, chat_id=cid))
+        return targets
+
+    @classmethod
     def jp_from_env(cls) -> "list[TelegramSettings]":
         """일본 기업 요약을 전송할 chat 목록.
 
