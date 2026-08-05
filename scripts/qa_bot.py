@@ -139,9 +139,29 @@ def run_once(question: str) -> None:
     print(handle_question(grok, question))
 
 
+def acquire_single_instance_lock():
+    """데몬이 동시에 두 개 돌지 않도록 배타 잠금을 잡는다.
+
+    같은 봇 토큰으로 폴러가 2개면 텔레그램 getUpdates가 409 Conflict를 내고
+    메시지가 유실될 수 있다. 이미 실행 중이면 잠금 실패로 즉시 종료한다.
+    """
+    import fcntl
+
+    lock_path = LOG_DIR / "qa_bot.lock"
+    LOG_DIR.mkdir(exist_ok=True)
+    fh = open(lock_path, "w")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        log.error("이미 다른 qa_bot 인스턴스가 실행 중입니다. 이 인스턴스는 종료합니다.")
+        sys.exit(0)
+    return fh  # 프로세스가 살아있는 동안 잠금 유지(GC 방지 위해 반환값 보관)
+
+
 def run_daemon() -> None:
     load_env_file()
     setup_logging()
+    _lock = acquire_single_instance_lock()  # noqa: F841 - 살아있는 동안 잠금 유지
     grok = GrokSettings.from_env()
     token = _get_env("QA_BOT_TOKEN")
     me = tg(token, "getMe").get("result", {})
