@@ -12,8 +12,10 @@ Usage:
 
 from __future__ import annotations
 
+import html
 import json
 import logging
+import re
 import sys
 import time
 import urllib.parse
@@ -58,13 +60,46 @@ def tg(token: str, method: str, **params) -> dict:
         return json.load(r)
 
 
+def md_to_telegram_html(text: str) -> str:
+    """Grok이 내는 마크다운을 텔레그램 HTML(parse_mode=HTML)로 변환.
+
+    텔레그램은 ## 헤더·리스트 마크다운을 렌더하지 않으므로 굵게(<b>)와 순수 텍스트로
+    정리한다. 먼저 HTML 특수문자를 이스케이프한 뒤 서식만 태그로 되살린다.
+    """
+    out_lines = []
+    for line in text.split("\n"):
+        s = html.escape(line)
+        # ### 헤더 → 굵게 (마커 제거)
+        m = re.match(r"\s*#{1,6}\s+(.*)", s)
+        if m:
+            out_lines.append(f"<b>{m.group(1).strip()}</b>")
+            continue
+        # - / * 불릿 → • 로 정규화
+        s = re.sub(r"^(\s*)[-*]\s+", r"\1• ", s)
+        # **굵게** / __굵게__ → <b>
+        s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
+        s = re.sub(r"__(.+?)__", r"<b>\1</b>", s)
+        # *기울임* → 텔레그램 <i> (단, 남은 단독 * 는 제거)
+        s = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<i>\1</i>", s)
+        # `코드` → <code>
+        s = re.sub(r"`(.+?)`", r"<code>\1</code>", s)
+        out_lines.append(s)
+    return "\n".join(out_lines)
+
+
 def send(token: str, chat_id: str, text: str) -> None:
-    # 텔레그램 4096자 제한 → 분할.
-    for i in range(0, len(text), 3900):
+    body = md_to_telegram_html(text)
+    # 텔레그램 4096자 제한 → 분할(태그 깨짐 방지 위해 넉넉히 3900).
+    for i in range(0, len(body), 3900):
+        chunk = body[i : i + 3900]
         try:
-            tg(token, "sendMessage", chat_id=chat_id, text=text[i : i + 3900])
+            tg(token, "sendMessage", chat_id=chat_id, text=chunk, parse_mode="HTML")
         except Exception as exc:  # noqa: BLE001
-            log.error("전송 실패: %s", exc)
+            log.error("HTML 전송 실패, 평문 재시도: %s", exc)
+            try:
+                tg(token, "sendMessage", chat_id=chat_id, text=re.sub(r"<[^>]+>", "", chunk))
+            except Exception as exc2:  # noqa: BLE001
+                log.error("평문 전송도 실패: %s", exc2)
 
 
 def parse_ask(text: str) -> str | None:
