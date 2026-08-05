@@ -35,7 +35,9 @@ def resolve_companies(settings: GrokSettings, question: str, companies: list[str
     하나도 없을 때만 LLM에 목록을 후보로 주고 고르게 한다(닫힌 목록이라 환각 차단).
     """
     q = question.strip()
-    # 1) 코드 즉시 매칭: 질문에 이름이 그대로 들어있는 회사를 전부 수집(비교 질문 대응).
+    if not companies:
+        return []
+    # 1) 코드 즉시 매칭: 질문에 이름이 그대로 들어있는 회사를 전부 수집.
     lowered = q.lower()
     matched: list[str] = []
     for name in companies:
@@ -43,12 +45,9 @@ def resolve_companies(settings: GrokSettings, question: str, companies: list[str
                         name)[0].strip().lower()
         if core and len(core) >= 3 and core in lowered:
             matched.append(name)
-    if matched:
-        return matched[:4]
 
-    # 2) LLM 판별 (쉼표 구분 복수 허용).
-    if not companies:
-        return []
+    # 2) LLM 판별을 항상 병행해 합친다. 코드 매칭만 믿고 조기 반환하면
+    #    티커·통칭으로 지칭된 나머지 기업(예: 'AMD랑 arm 비교'의 AMD)을 놓친다.
     listing = "\n".join(f"- {c}" for c in companies)
     prompt = f"[보유 기업 목록]\n{listing}\n\n[사용자 질문]\n{q}\n\n[정답: 회사명(들) 또는 NONE]"
     try:
@@ -60,16 +59,18 @@ def resolve_companies(settings: GrokSettings, question: str, companies: list[str
         ).strip()
     except Exception as exc:  # noqa: BLE001
         log.warning("종목 인식 LLM 실패: %s", exc)
-        return []
-    if not answer or answer.upper() == "NONE":
-        return []
-    # 회사명에 쉼표가 포함되므로(예: 'Advanced Micro Devices, Inc.') 쉼표 분리는
-    # 불가. 대신 목록의 각 회사명이 LLM 답변 문자열에 등장하는지로 매칭한다.
-    low = answer.lower()
-    picked = [c for c in companies if c.lower() in low]
-    if not picked:
-        log.warning("종목 인식 결과가 목록과 불일치: %r", answer)
-    return picked[:4]
+        return matched[:4]
+    llm_picked: list[str] = []
+    if answer and answer.upper() != "NONE":
+        # 회사명에 쉼표가 포함되므로(예: 'Advanced Micro Devices, Inc.') 쉼표 분리는
+        # 불가. 대신 목록의 각 회사명이 LLM 답변 문자열에 등장하는지로 매칭한다.
+        low = answer.lower()
+        llm_picked = [c for c in companies if c.lower() in low]
+        if not llm_picked:
+            log.warning("종목 인식 결과가 목록과 불일치: %r", answer)
+    # 코드 매칭 + LLM 판별 합집합 (순서 유지, 중복 제거).
+    combined = matched + [c for c in llm_picked if c not in matched]
+    return combined[:4]
 
 
 KEYWORD_SYSTEM = (
