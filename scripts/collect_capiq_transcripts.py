@@ -245,6 +245,21 @@ def load_manifest_keys() -> set[str]:
     }
 
 
+def load_local_file_keys() -> set[str]:
+    """로컬에 파일이 실제로 존재하는 항목의 dedupe 키.
+
+    backfill 모드에서 '이미 받은 것'의 기준으로 쓴다. manifest에는 있으나 파일이
+    없는 항목(다른 PC에서 수집)을 신규로 취급해 다시 받게 하기 위함이다."""
+    keys: set[str] = set()
+    for row in normalize_manifest():
+        rel = (row.get("file") or "").strip().replace("\\", "/")
+        if not (row.get("company") and row.get("event_date") and rel):
+            continue
+        if (ROOT / rel).exists():
+            keys.add(build_dedupe_key(row["company"], row["event_date"]))
+    return keys
+
+
 def append_manifest(entry: dict) -> None:
     TRANSCRIPTS_DIR.mkdir(exist_ok=True)
     write_header = not MANIFEST_PATH.exists()
@@ -620,13 +635,20 @@ def _collect(run_started_at: datetime) -> int:
     setup_mode = "--setup" in sys.argv
     dump_mode = "--dump" in sys.argv
 
+    # backfill: manifest에는 있으나 로컬 파일이 없는 항목을 다시 받는다(다른 PC에서
+    # 수집돼 파일이 이 머신에 없는 경우). 그리드에 아직 보이는 행만 대상이 된다.
+    backfill_mode = "--backfill" in sys.argv
+
     cfg = load_config()
-    seen = load_manifest_keys()
+    seen = load_local_file_keys() if backfill_mode else load_manifest_keys()
     preferred_format = str(cfg.get("download_format", "word")).strip().lower()
     if preferred_format not in {"word", "pdf"}:
         raise ValueError("download_format must be either 'word' or 'pdf'.")
 
     max_downloads = int(cfg.get("max_per_run", 4))
+    if backfill_mode:
+        max_downloads = 200  # 보충은 한 번에 끝내도록 상한을 크게
+        log.info("BACKFILL 모드: 로컬 파일 없는 항목을 재수집합니다 (상한 %d)", max_downloads)
     if max_downloads < 1:
         raise ValueError("max_per_run must be at least 1.")
 
