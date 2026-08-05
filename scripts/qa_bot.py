@@ -165,13 +165,23 @@ def handle_question(grok: GrokSettings, question: str) -> str:
     docs = corpus.load_docs()
     if not docs:
         return "아직 수집된 transcript가 없습니다."
-    companies = corpus.company_list(docs)
-    picked = llm.resolve_companies(grok, question, companies)
-    if not picked:
+    available = corpus.company_list(docs)
+    # 인식은 manifest 전체(파일 없는 것 포함)로 한다 → '모르는 기업'과
+    # '파일이 없는 기업'을 구분해 안내할 수 있다.
+    picked_all = llm.resolve_companies(grok, question, corpus.all_companies())
+    if not picked_all:
         return (
             "질문에서 대상 기업을 특정하지 못했습니다. "
             "회사명이나 티커를 넣어 다시 물어봐 주세요.\n"
-            f"(현재 보유 기업 {len(companies)}곳)"
+            f"(현재 보유 기업 {len(available)}곳)"
+        )
+    picked = [c for c in picked_all if c in available]
+    missing = [c for c in picked_all if c not in available]
+    if not picked:
+        return (
+            f"🏢 {', '.join(picked_all)}\n\n"
+            "해당 기업 transcript가 이 서버에 없습니다. "
+            "(Mac 이전 전에 수집된 자료라 파일이 Windows PC에 있습니다)"
         )
     keywords = llm.extract_keywords(grok, question)
     # 복수 기업이면 기업별로 검색해 근거를 합친다(기업당 top-k를 나눠 균형 유지).
@@ -183,7 +193,8 @@ def handle_question(grok: GrokSettings, question: str) -> str:
     label = ", ".join(picked)
     answer = llm.answer_question(grok, question, label, contexts)
     srcs = ", ".join(sorted({lb for lb, _ in contexts}))
-    return f"🏢 {label}\n\n{answer}\n\n— 근거: {srcs}"
+    note = f"\n※ {', '.join(missing)}는 transcript가 서버에 없어 제외했습니다." if missing else ""
+    return f"🏢 {label}\n\n{answer}\n\n— 근거: {srcs}{note}"
 
 
 def run_once(question: str) -> None:

@@ -54,6 +54,22 @@ def load_docs() -> list[Doc]:
     return docs
 
 
+def all_companies() -> list[str]:
+    """manifest에 있는 모든 회사명 (로컬 파일 유무와 무관).
+
+    종목 인식은 이 목록으로 한다. 그래야 '파일이 없는 기업'과 '아예 모르는 기업'을
+    구분해 안내할 수 있다."""
+    if not MANIFEST.exists():
+        return []
+    seen: dict[str, None] = {}
+    with MANIFEST.open(encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            name = (row.get("company") or "").strip()
+            if name and name not in seen:
+                seen[name] = None
+    return list(seen.keys())
+
+
 def company_list(docs: list[Doc]) -> list[str]:
     """중복 제거한 보유 기업명 목록 (종목 인식 후보로 LLM에 제공)."""
     seen: dict[str, None] = {}
