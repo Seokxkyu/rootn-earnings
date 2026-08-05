@@ -62,16 +62,17 @@ class TelegramSettings:
         return cls(bot_token=token, chat_id=chat_id)
 
     @classmethod
-    def jp_from_env(cls) -> "TelegramSettings | None":
-        """일본 기업 요약을 추가 전송할 chat.
+    def jp_from_env(cls) -> "list[TelegramSettings]":
+        """일본 기업 요약을 전송할 chat 목록.
 
+        JP_TELEGRAM_CHAT_ID는 쉼표 구분으로 여러 수신자(개인 DM 등)를 지정할 수 있다.
         전용 봇 JP_BOT_TOKEN이 있으면 그 봇을, 없으면 요약 봇(TELEGRAM_BOT_TOKEN)을 쓴다.
-        JP_TELEGRAM_CHAT_ID가 없으면 None(추가 전송 안 함)."""
-        chat_id = os.getenv("JP_TELEGRAM_CHAT_ID", "").strip()
+        미설정이면 빈 리스트(전송 안 함)."""
+        raw = os.getenv("JP_TELEGRAM_CHAT_ID", "").strip()
         token = os.getenv("JP_BOT_TOKEN", "").strip() or os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-        if not chat_id or not token:
-            return None
-        return cls(bot_token=token, chat_id=chat_id)
+        if not raw or not token:
+            return []
+        return [cls(bot_token=token, chat_id=part.strip()) for part in raw.split(",") if part.strip()]
 
     @classmethod
     def ops_from_env(cls) -> "TelegramSettings":

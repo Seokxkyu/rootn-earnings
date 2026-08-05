@@ -99,7 +99,7 @@ def main() -> int:
 
     grok = GrokSettings.from_env()
     telegram = TelegramSettings.from_env() if args.send else None
-    jp_telegram = TelegramSettings.jp_from_env() if args.send else None  # 없으면 None
+    jp_telegram = TelegramSettings.jp_from_env() if args.send else []  # 미설정이면 빈 리스트
 
     # 스트리밍 처리: 종목별로 [요약 -> 즉시 전송 -> 전송 마커]를 끝내고 다음으로 넘어간다.
     # 중간에 죽어도 완료된 종목은 이미 전송돼 있고, 재실행은 마커 없는 것만 이어서 처리한다.
@@ -142,7 +142,15 @@ def main() -> int:
                 # (kioxia, murata)는 미국 기업과 동일하게 Earnings방에만 보낸다.
                 # 일본방이 미설정이면 일본 기업도 Earnings방으로 폴백.
                 if jp_telegram and is_jp and not jp_excluded:
-                    jp_sent_count += send_messages(jp_telegram, msgs)
+                    jp_ok = 0
+                    for jp in jp_telegram:
+                        try:
+                            jp_ok += send_messages(jp, msgs)
+                        except Exception as exc:  # noqa: BLE001 - 수신자 1명 실패가 나머지를 막지 않도록
+                            log.warning("일본 chat %s 전송 실패: %s", jp.chat_id, exc)
+                    if jp_ok == 0:
+                        raise RuntimeError("일본 수신자 전원 전송 실패")
+                    jp_sent_count += jp_ok
                 else:
                     sent_count += send_messages(telegram, msgs)
                 marker.write_text(datetime.now().isoformat(), encoding="utf-8")
