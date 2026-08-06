@@ -7,7 +7,9 @@ manifest.csv를 단일 소스로 쓴다(회사명·발표일·파일경로). 파
 from __future__ import annotations
 
 import csv
+import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import sys
@@ -16,6 +18,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from summary_lib.config import ROOT, TRANSCRIPTS_DIR  # noqa: E402
 
 MANIFEST = TRANSCRIPTS_DIR / "manifest.csv"
+
+
+def _norm_basename(name: str) -> str:
+    return re.sub(r"\s+", " ", name.replace("&", " ")).strip().lower()
+
+
+@lru_cache(maxsize=1)
+def _local_by_basename() -> dict[str, Path]:
+    """실제 디스크 파일을 정규화 파일명으로 인덱싱. manifest 경로가 어긋나도
+    Q&A가 파일을 찾을 수 있게 하는 안전망(수집기 reconcile이 놓친 경우 대비)."""
+    idx: dict[str, Path] = {}
+    if TRANSCRIPTS_DIR.exists():
+        for p in TRANSCRIPTS_DIR.rglob("*.docx"):
+            idx.setdefault(_norm_basename(p.name), p)
+    return idx
 
 
 @dataclass(frozen=True)
@@ -42,7 +59,11 @@ def load_docs() -> list[Doc]:
                 continue
             path = (ROOT / rel).resolve()
             if not path.exists():
-                continue
+                # manifest 경로가 어긋난 경우 실제 파일을 파일명으로 찾는다.
+                alt = _local_by_basename().get(_norm_basename(Path(rel).name))
+                if not alt:
+                    continue
+                path = alt.resolve()
             docs.append(
                 Doc(
                     company=(row.get("company") or "").strip(),

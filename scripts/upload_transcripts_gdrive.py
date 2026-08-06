@@ -132,6 +132,11 @@ def main() -> int:
     fail_count = 0
     for path in pending:
         rel = str(path.relative_to(ROOT))
+        # enumerate와 copy 사이에 수집기가 파일을 다른 폴더로 재배치했을 수 있다.
+        # 사라졌으면 이번 회차엔 건너뛴다(다음 회차가 새 위치에서 다시 잡는다).
+        if not path.exists():
+            log.info("업로드 건너뜀(재배치됨): %s", rel)
+            continue
         dest = f"{REMOTE_BASE}/{company_folder(path)}"
         try:
             if rclone_copy(path, dest):

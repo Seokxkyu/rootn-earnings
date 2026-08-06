@@ -214,12 +214,40 @@ def write_manifest_rows(rows: list[dict]) -> None:
             writer.writerow({field: row.get(field, "") for field in MANIFEST_FIELDS})
 
 
+def _norm_basename(name: str) -> str:
+    """파일명 정규화: '&'→공백, 연속공백 축약, 소문자. 경로 대조용 키."""
+    return re.sub(r"\s+", " ", name.replace("&", " ")).strip().lower()
+
+
+def reconcile_manifest_paths(rows: list[dict]) -> bool:
+    """manifest의 file 경로가 실제 파일과 어긋난 행을 실제 위치로 교정.
+
+    migrate_storage_layout가 계산으로 정한 경로에 파일이 없을 때(다른 날짜 폴더에
+    있거나, '&'가 파일명에서 공백으로 바뀐 철자 차이) 디스크의 실제 파일을 찾아
+    맞춘다. 이렇게 안 하면 파일이 있는데도 dedup·Q&A가 '없음'으로 오판한다."""
+    local: dict[str, str] = {}
+    for path in TRANSCRIPTS_DIR.rglob("*.docx"):
+        local.setdefault(_norm_basename(path.name), str(path.relative_to(ROOT)))
+    changed = False
+    for row in rows:
+        rel = norm(row.get("file", "")).replace("\\", "/")
+        if not rel or (ROOT / rel).exists():
+            continue
+        actual = local.get(_norm_basename(Path(rel).name))
+        if actual and actual != rel:
+            row["file"] = actual
+            changed = True
+    return changed
+
+
 def normalize_manifest() -> list[dict]:
     rows = parse_manifest_rows()
     if not rows:
         return []
 
     rows = migrate_storage_layout(rows)
+    if reconcile_manifest_paths(rows):
+        write_manifest_rows(rows)
 
     deduped: dict[str, dict] = {}
     for row in rows:
