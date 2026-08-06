@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 .env
 .claude/settings.local.json
+
+# Q&A 임베딩 인덱스 (로컬 생성물, git 제외)
+index/

@@ -54,6 +54,7 @@ PYTHON = sys.executable
 COLLECT_SCRIPT = ROOT / "scripts" / "collect_capiq_transcripts.py"
 SUMMARY_SCRIPT = ROOT / "scripts" / "run_summary_pipeline.py"
 GDRIVE_SCRIPT = ROOT / "scripts" / "upload_transcripts_gdrive.py"
+INDEX_SCRIPT = ROOT / "scripts" / "qa_lib" / "indexer.py"
 LATEST_RUN = RUNS_DIR / "latest.json"
 LATEST_BATCH = SUMMARY_ROOT / "latest_batch.json"
 
@@ -153,6 +154,14 @@ def upload_gdrive() -> None:
         )
 
 
+def index_embeddings() -> None:
+    """신규 transcript를 Q&A 임베딩 인덱스에 추가. OPENAI_API_KEY 없으면 자체 생략.
+    실패해도 파이프라인은 성공 처리(키워드 검색으로 폴백)."""
+    code, err = run_step("임베딩 인덱싱", [str(INDEX_SCRIPT)])
+    if code != 0:
+        log.warning("임베딩 인덱싱 실패 (무시, 키워드 검색으로 폴백): %s", (err or "").strip()[:200])
+
+
 def main() -> int:
     load_env_file()
     setup_logging()
@@ -215,7 +224,10 @@ def main() -> int:
     # --- STEP 3: 구글드라이브 업로드 (실패해도 파이프라인은 성공 처리) ---
     upload_gdrive()
 
-    # --- STEP 4: 완료 알림 (정상 운영 → 요약 봇) ---
+    # --- STEP 4: Q&A 임베딩 인덱싱 (키 없으면 자체 생략) ---
+    index_embeddings()
+
+    # --- STEP 5: 완료 알림 (정상 운영 → 요약 봇) ---
     sent = read_json_int(LATEST_BATCH, "summary_count")
     elapsed = (datetime.now() - started).total_seconds()
     notify_ops(
