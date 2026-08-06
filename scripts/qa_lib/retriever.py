@@ -92,11 +92,12 @@ def _embedding_ranked(docs: list[Doc], question: str, top_k: int) -> list[tuple[
         return None
     chunks, emb = data
     import numpy as np
-    want_paths = {str(d.path) for d in docs}
+    # 대상 문서 필터: label(회사명+발표일)과 파일명(basename)으로 매칭.
     want_labels = {d.label for d in docs}
+    want_basenames = {d.path.name for d in docs}
     rows = [i for i, c in enumerate(chunks)
-            if c.get("label") in want_labels or c.get("path") in want_paths
-            or (ROOT / c.get("path", "")).as_posix() in want_paths]
+            if c.get("label") in want_labels
+            or Path(c.get("path", "")).name in want_basenames]
     if not rows:
         return None
     try:
