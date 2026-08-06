@@ -34,7 +34,7 @@ LOG_DIR = ROOT / "logs"
 RCLONE = "/opt/homebrew/bin/rclone"
 REMOTE_BASE = "gdrive:Investment Research/Transcripts"
 TRANSCRIPT_SUFFIXES = {".docx", ".pdf", ".doc"}
-PER_FILE_TIMEOUT_SEC = 180
+PER_FILE_TIMEOUT_SEC = 600
 
 log = logging.getLogger("gdrive_upload")
 
@@ -94,7 +94,13 @@ def append_ledger(rel_path: str) -> None:
 
 def rclone_copy(src: Path, dest_dir: str) -> bool:
     result = subprocess.run(
-        [RCLONE, "copy", str(src), dest_dir, "--retries", "2"],
+        [
+            RCLONE, "copy", str(src), dest_dir,
+            "--retries", "4",
+            "--low-level-retries", "10",
+            "--contimeout", "30s",
+            "--timeout", "2m",
+        ],
         capture_output=True,
         text=True,
         timeout=PER_FILE_TIMEOUT_SEC,
