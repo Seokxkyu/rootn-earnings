@@ -64,7 +64,12 @@ def search(
     extra_terms는 한→영 변환 등 LLM이 뽑은 검색어(영어 transcript 매칭용).
     질문 용어가 하나도 안 걸리면 각 문서 앞부분(개요)을 폴백으로 준다.
     """
-    terms = set(_terms(question) + [t.lower() for t in (extra_terms or [])])
+    # 키워드는 'oil prices'처럼 구 단위로 오므로 단어로 쪼개 매칭한다. 통째로
+    # substring 매칭하면 본문의 'oil'·'fuel prices'(따로 등장)를 놓친다.
+    extra_tokens: list[str] = []
+    for kw in (extra_terms or []):
+        extra_tokens.extend(_terms(kw))
+    terms = set(_terms(question) + extra_tokens)
     entries: list[tuple[str, str, str]] = []  # (label, 원문청크, 소문자청크)
     for d in docs:
         try:

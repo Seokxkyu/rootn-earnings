@@ -184,8 +184,9 @@ def handle_question(grok: GrokSettings, question: str) -> str:
             "(Mac 이전 전에 수집된 자료라 파일이 Windows PC에 있습니다)"
         )
     keywords = llm.extract_keywords(grok, question)
-    # 복수 기업이면 기업별로 검색해 근거를 합친다(기업당 top-k를 나눠 균형 유지).
-    per_k = max(2, 5 // len(picked)) if len(picked) > 1 else 5
+    # 복수 기업이면 기업별로 검색해 근거를 합친다. 기업당 충분한 청크를 줘야
+    # 여러 문단에 흩어진 주제(예: 유가 코멘트)를 놓치지 않는다.
+    per_k = 5 if len(picked) == 1 else 4
     contexts: list[tuple[str, str]] = []
     for company in picked:
         target = corpus.docs_for_company(docs, company)
