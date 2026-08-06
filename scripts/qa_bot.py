@@ -183,16 +183,40 @@ def handle_question(grok: GrokSettings, question: str) -> str:
             "해당 기업 transcript가 이 서버에 없습니다. "
             "(Mac 이전 전에 수집된 자료라 파일이 Windows PC에 있습니다)"
         )
-    keywords = llm.extract_keywords(grok, question)
-    # 복수 기업이면 기업별로 검색해 근거를 합친다. 기업당 충분한 청크를 줘야
-    # 여러 문단에 흩어진 주제(예: 유가 코멘트)를 놓치지 않는다.
-    per_k = 5 if len(picked) == 1 else 4
+    keywords, broad = llm.analyze_question(grok, question)
     contexts: list[tuple[str, str]] = []
-    for company in picked:
-        target = corpus.docs_for_company(docs, company)
-        contexts.extend(retriever.search(target, question, top_k=per_k, extra_terms=keywords))
+    if broad:
+        # 전체 훑기 질문(Q&A 전부 정리, 총평 등): 청크 검색으로는 누락이 생기므로
+        # 기업당 최신 transcript 원문 전체를 투입한다. 총량은 상한으로 보호.
+        from summary_lib.transcript_io import load_transcript_text
+
+        FULL_CHAR_CAP = 150_000  # 요약 파이프라인이 9만자 1-pass를 검증했으므로 여유 상한
+        used = 0
+        for company in picked:
+            target = corpus.docs_for_company(docs, company)
+            if not target:
+                continue
+            d = target[0]  # 최신 발표분
+            try:
+                text = load_transcript_text(d.path)
+            except Exception:  # noqa: BLE001
+                continue
+            budget = FULL_CHAR_CAP - used
+            if budget <= 0:
+                break
+            contexts.append((d.label, text[:budget]))
+            used += min(len(text), budget)
+    if not contexts:
+        # 핀포인트 질문(또는 broad 로드 실패): 하이브리드 청크 검색.
+        per_k = 5 if len(picked) == 1 else 4
+        for company in picked:
+            target = corpus.docs_for_company(docs, company)
+            contexts.extend(retriever.search(target, question, top_k=per_k, extra_terms=keywords))
     label = ", ".join(picked)
-    answer = llm.answer_question(grok, question, label, contexts)
+    answer = llm.answer_question(
+        grok, question, label, contexts,
+        max_output_tokens=2400 if broad else 1200,
+    )
     srcs = ", ".join(sorted({lb for lb, _ in contexts}))
     note = f"\n※ {', '.join(missing)}는 transcript가 서버에 없어 제외했습니다." if missing else ""
     return f"🏢 {label}\n\n{answer}\n\n— 근거: {srcs}{note}"

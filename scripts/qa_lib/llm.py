@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from pathlib import Path
@@ -75,27 +76,39 @@ def resolve_companies(settings: GrokSettings, question: str, companies: list[str
     return combined[:4]
 
 
-KEYWORD_SYSTEM = (
-    "너는 검색어 추출기다. 사용자 질문을 영어 어닝콜 transcript에서 찾기 위한 "
-    "핵심 검색어를 뽑는다. 한국어 질문이면 영어로 번역한 핵심 명사·고유명사를 낸다. "
-    "제품명·세그먼트·재무용어 위주로 3~8개, 쉼표로만 구분해 한 줄로 출력한다. "
-    "예: 'iPhone, Services, revenue, gross margin, China'."
+ANALYZE_SYSTEM = (
+    "너는 질문 분석기다. 두 가지를 판단해 한 줄 JSON으로만 출력한다.\n"
+    '형식: {"keywords": ["...", "..."], "scope": "narrow" 또는 "broad"}\n'
+    "- keywords: 영어 어닝콜 transcript 검색용 핵심 검색어 3~8개. 한국어 질문이면 "
+    "영어로 번역한 명사·고유명사(제품명·세그먼트·재무용어) 위주.\n"
+    "- scope: 특정 수치·주제를 묻는 핀포인트 질문이면 narrow. transcript 전반을 "
+    "훑어야 답할 수 있는 질문(전체 정리·요약·Q&A 세션 전부·모든 언급·리스트업·"
+    "분위기/톤 총평 등)이면 broad."
 )
 
 
-def extract_keywords(settings: GrokSettings, question: str) -> list[str]:
-    """질문에서 영어 transcript 검색용 키워드를 뽑는다(한→영 포함). 실패 시 빈 리스트."""
+def analyze_question(settings: GrokSettings, question: str) -> tuple[list[str], bool]:
+    """(검색 키워드, 전체훑기 여부). 실패 시 ([], False)로 안전 폴백."""
     try:
         raw = call_grok(
             settings,
-            system_prompt=KEYWORD_SYSTEM,
+            system_prompt=ANALYZE_SYSTEM,
             user_prompt=question.strip(),
-            max_output_tokens=60,
-        )
+            max_output_tokens=120,
+        ).strip()
+        m = re.search(r"\{.*\}", raw, re.S)
+        data = json.loads(m.group(0)) if m else {}
+        keywords = [str(k).strip() for k in data.get("keywords", []) if str(k).strip()]
+        broad = str(data.get("scope", "narrow")).lower() == "broad"
+        return keywords, broad
     except Exception as exc:  # noqa: BLE001
-        log.warning("키워드 추출 실패: %s", exc)
-        return []
-    return [t.strip() for t in re.split(r"[,\n]", raw) if t.strip()]
+        log.warning("질문 분석 실패(핀포인트로 폴백): %s", exc)
+        return [], False
+
+
+def extract_keywords(settings: GrokSettings, question: str) -> list[str]:
+    """하위호환용: 키워드만 필요할 때."""
+    return analyze_question(settings, question)[0]
 
 
 ANSWER_SYSTEM = (
@@ -116,6 +129,7 @@ def answer_question(
     question: str,
     company: str,
     contexts: list[tuple[str, str]],
+    max_output_tokens: int = 1200,
 ) -> str:
     """근거(발췌) 기반 답변 생성. contexts = [(출처라벨, 본문청크), ...].
 
@@ -134,5 +148,5 @@ def answer_question(
         settings,
         system_prompt=ANSWER_SYSTEM,
         user_prompt=prompt,
-        max_output_tokens=1200,
+        max_output_tokens=max_output_tokens,
     ).strip()
