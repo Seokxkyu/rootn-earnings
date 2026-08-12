@@ -131,3 +131,33 @@ def send_messages(
                 time.sleep(wait_sec)
         time.sleep(pause_sec)
     return sent
+
+
+def send_document(
+    settings: TelegramSettings,
+    file_path,
+    caption: str = "",
+    timeout_sec: int = 120,
+) -> bool:
+    """파일(원본 transcript 등)을 문서로 전송. 실패해도 예외 대신 False 반환.
+
+    요약 메시지 직후 원본을 첨부하는 용도라, 첨부 실패가 요약 전송을
+    실패로 만들지 않도록 한다.
+    """
+    try:
+        with open(file_path, "rb") as fh:
+            response = requests.post(
+                f"{TELEGRAM_API_BASE_URL}/bot{settings.bot_token}/sendDocument",
+                data={"chat_id": settings.chat_id, "caption": caption[:1000]},
+                files={"document": (str(file_path).rsplit("/", 1)[-1], fh)},
+                timeout=timeout_sec,
+            )
+        data = response.json()
+        if not data.get("ok"):
+            log.warning("문서 전송 실패 (chat %s): %s", settings.chat_id, str(data)[:200])
+            return False
+        log.info("원본 첨부 전송 완료 (chat %s): %s", settings.chat_id, str(file_path).rsplit("/", 1)[-1])
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.warning("문서 전송 예외 (chat %s): %s", settings.chat_id, exc)
+        return False

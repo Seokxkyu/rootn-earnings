@@ -36,7 +36,7 @@ from summary_lib.summarizer import (
     summarize_file,
     summary_md_path,
 )
-from summary_lib.telegram_client import build_telegram_messages, send_messages
+from summary_lib.telegram_client import build_telegram_messages, send_document, send_messages
 from summary_lib.transcript_io import select_input_files
 
 # 일본 기업이지만 미국 기업과 동일하게 단체 채팅방에만 전송할 기업 (JP 방 추가 전송 제외).
@@ -151,6 +151,10 @@ def main() -> int:
                             jp_ok += send_messages(jp, msgs)
                         except Exception as exc:  # noqa: BLE001 - 수신자 1명 실패가 나머지를 막지 않도록
                             log.warning("일본 chat %s 전송 실패: %s", jp.chat_id, exc)
+                            continue
+                        # 일본 기업은 요약 직후 원본 transcript(docx)를 첨부한다.
+                        # 첨부 실패는 경고만 (요약은 이미 전송됨).
+                        send_document(jp, path, caption=f"📄 원본 transcript · {path.name}")
                     if jp_ok == 0:
                         raise RuntimeError("일본 수신자 전원 전송 실패")
                     jp_sent_count += jp_ok
