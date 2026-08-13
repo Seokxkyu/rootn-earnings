@@ -18,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -66,7 +67,10 @@ def company_folder(path: Path) -> str:
 
     티커를 못 뽑으면 회사명만 쓴다. 같은 회사는 캐시로 일관된 폴더명을 보장한다.
     """
-    company = path.stem.split("_Earnings Call")[0].strip() or "_unclassified"
+    company = re.split(
+        r"_Earnings Call|_Analyst or Investor Day|_Investor Day|_Analyst Day",
+        path.stem,
+    )[0].strip() or "_unclassified"
     if company in _folder_cache:
         return _folder_cache[company]
     ticker = TICKER_OVERRIDES.get(company, "")

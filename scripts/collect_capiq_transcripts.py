@@ -98,10 +98,21 @@ def normalize_event_date(value: str) -> str:
         return cleaned
 
 
-def build_dedupe_key(company: str, event_date: str) -> str:
+# 수집 대상 이벤트 유형. Earnings Call 외에 Analyst/Investor Day도 수집한다(2026-08-12
+# 추가). CapIQ 표기는 "Analyst or Investor Day" — analyst day/investor day 모두 매칭.
+EVENT_TYPE_RE = re.compile(r"earnings call|investor day|analyst day", re.I)
+
+
+def build_dedupe_key(company: str, event_date: str, event: str = "") -> str:
+    """회사+발표일 기준 중복 키. Investor Day는 접미사를 붙여 같은 날짜의
+    Earnings Call과 충돌하지 않게 한다(기존 어닝콜 키는 변화 없음 — 하위호환)."""
     canonical_company = normalize_token(company)
     canonical_date = normalize_event_date(event_date)
-    return f"{canonical_company}|{canonical_date}"
+    key = f"{canonical_company}|{canonical_date}"
+    low = (event or "").lower()
+    if "investor day" in low or "analyst day" in low:
+        key += "|investorday"
+    return key
 
 
 def infer_format_from_path(path_str: str) -> str:
@@ -252,7 +263,7 @@ def normalize_manifest() -> list[dict]:
     deduped: dict[str, dict] = {}
     for row in rows:
         fmt = row.get("format", "")
-        dedupe_key = build_dedupe_key(row["company"], row["event_date"])
+        dedupe_key = build_dedupe_key(row["company"], row["event_date"], row.get("event", ""))
         if dedupe_key in deduped:
             if fmt == "word" and deduped[dedupe_key].get("format") != "word":
                 deduped[dedupe_key] = row
@@ -267,7 +278,7 @@ def normalize_manifest() -> list[dict]:
 def load_manifest_keys() -> set[str]:
     rows = normalize_manifest()
     return {
-        build_dedupe_key(row["company"], row["event_date"])
+        build_dedupe_key(row["company"], row["event_date"], row.get("event", ""))
         for row in rows
         if row.get("company") and row.get("event_date")
     }
@@ -284,7 +295,7 @@ def load_local_file_keys() -> set[str]:
         if not (row.get("company") and row.get("event_date") and rel):
             continue
         if (ROOT / rel).exists():
-            keys.add(build_dedupe_key(row["company"], row["event_date"]))
+            keys.add(build_dedupe_key(row["company"], row["event_date"], row.get("event", "")))
     return keys
 
 
@@ -430,13 +441,13 @@ def extract_company_and_event(row: Locator, row_text: str) -> tuple[str, str]:
     company = link_texts[0] if link_texts else ""
     event = ""
     for text in link_texts[1:]:
-        if "earnings call" in text.lower():
+        if EVENT_TYPE_RE.search(text):
             event = text
             break
 
     if not event:
         match = re.search(
-            r"([A-Za-z0-9][^|]*?Earnings Call(?:,\s*[A-Za-z]{3}\s+\d{1,2},\s*\d{4})?)",
+            r"([A-Za-z0-9][^|]*?(?:Earnings Call|Analyst or Investor Day|Investor Day|Analyst Day)(?:,\s*[A-Za-z]{3}\s+\d{1,2},\s*\d{4})?)",
             row_text,
             re.I,
         )
@@ -546,11 +557,17 @@ def scan_rows(
         except PWTimeout:
             continue
 
-        if "earnings call" not in row_text.lower():
+        if not EVENT_TYPE_RE.search(row_text):
             continue
 
         company, event = extract_company_and_event(row, row_text)
         event_date = extract_event_date(event)
+        if not event_date:
+            # Investor Day 등은 이벤트명 끝에 날짜가 없다. 행 맨 앞의 일시
+            # 컬럼(예: '2026-08-13 오후 10:00 ...')에서 ISO 날짜를 취한다.
+            iso = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", row_text)
+            if iso:
+                event_date = iso.group(1)
         download_btn, actual_format, language, needs_translation = pick_download_button(
             row, preferred_format
         )
@@ -562,7 +579,7 @@ def scan_rows(
             log.warning("Skipping row because its event date could not be parsed: %s", row_text)
             continue
 
-        key = build_dedupe_key(company, event_date)
+        key = build_dedupe_key(company, event_date, event)
         if key in seen or key in seen_this_run:
             continue
 
