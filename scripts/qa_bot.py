@@ -150,15 +150,24 @@ def send(token: str, chat_id: str, text: str) -> None:
                 log.error("평문 전송도 실패: %s", exc2)
 
 
+EMPTY_ASK = "__EMPTY_ASK__"
+
+
 def parse_ask(text: str) -> str | None:
-    """/ask 또는 /ask@봇 뒤의 질문 텍스트. 명령이 아니면 None."""
+    """/ask 또는 /ask@봇 뒤의 질문 텍스트.
+
+    질문은 스페이스뿐 아니라 줄바꿈으로 이어져도 인식한다
+    ('/ask\\n- 질문' 형태로 쓰는 사용자가 실제로 있었음).
+    명령이 아니면 None, 질문이 비었으면 EMPTY_ASK 반환(사용법 안내용).
+    """
     if not text:
         return None
-    head, _, rest = text.strip().partition(" ")
-    cmd = head.split("@")[0].lower()
+    parts = re.split(r"\s+", text.strip(), maxsplit=1)
+    cmd = parts[0].split("@")[0].lower()
     if cmd != "/ask":
         return None
-    return rest.strip() or None
+    rest = parts[1].strip() if len(parts) > 1 else ""
+    return rest or EMPTY_ASK
 
 
 def handle_question(grok: GrokSettings, question: str) -> str:
@@ -278,6 +287,9 @@ def run_daemon() -> None:
             if not question:
                 continue
             chat_id = str(chat.get("id"))
+            if question == EMPTY_ASK:
+                send(token, chat_id, "질문을 함께 적어주세요. 예: /ask 애플 실적 어땠어?")
+                continue
             log.info("질문 수신 (chat %s): %s", chat_id, question)
             try:
                 reply = handle_question(grok, question)
