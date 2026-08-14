@@ -136,21 +136,8 @@ def main() -> int:
 
             if args.send:
                 msgs = build_telegram_messages([result])
-                # Investor/Analyst Day는 아직 테스트 단계(2026-08-14): 채널·단체방·일본DM
-                # 대신 개인 chat(ALERT_CHAT_ID)으로만 보낸다. 검증 후 실운영 전환 예정.
-                if re.search(r"investor day|analyst day", path.name, re.I):
-                    test_chat = os.getenv("ALERT_CHAT_ID", "").strip()
-                    if test_chat:
-                        test_target = TelegramSettings(
-                            bot_token=os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
-                            chat_id=test_chat,
-                        )
-                        sent_count += send_messages(test_target, msgs)
-                        log.info("Investor Day 테스트 전송(개인 chat %s): %s", test_chat, path.name)
-                    marker.write_text(datetime.now().isoformat(), encoding="utf-8")
-                    log.info("[%d/%d] 전송 완료: %s", idx, len(files), path.name)
-                    results.append(result)
-                    continue
+                # Investor/Analyst Day도 어닝콜과 동일 라우팅으로 전송한다
+                # (2026-08-14 사용자 형식 승인 후 실운영 전환).
                 # 일본 판정: 거래소 코드가 TSE(도쿄)인 경우만. 숫자 티커 판정은
                 # 대만(TSEC)·홍콩(SEHK) 기업을 일본으로 오분류하므로 쓰지 않는다.
                 is_jp = str(result.get("exchange", "")).strip() == "TSE"
