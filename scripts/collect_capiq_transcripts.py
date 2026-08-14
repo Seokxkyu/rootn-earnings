@@ -676,7 +676,28 @@ def main() -> int:
         return 1
 
 
+def acquire_collector_lock():
+    """수집 실행을 머신 전체에서 1개로 제한하는 배타 잠금.
+
+    두 실행이 겹치면 같은 .browser_profile을 두 Chrome이 잡으려다
+    TargetClosedError(브라우저 강제 종료)로 서로 죽는다(2026-08-14 실제 발생).
+    이미 실행 중이면 exit 4로 즉시 종료한다 — 파이프라인은 이를 실패로 알리고,
+    다음 회차가 자연히 이어받는다.
+    """
+    import fcntl
+
+    LOG_DIR.mkdir(exist_ok=True)
+    fh = open(LOG_DIR / "collector.lock", "w")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        log.error("다른 수집 실행이 진행 중입니다. 이 실행은 종료합니다 (exit 4).")
+        sys.exit(4)
+    return fh
+
+
 def _collect(run_started_at: datetime) -> int:
+    _lock = acquire_collector_lock()  # noqa: F841 - 실행 동안 잠금 유지
     setup_mode = "--setup" in sys.argv
     dump_mode = "--dump" in sys.argv
 
