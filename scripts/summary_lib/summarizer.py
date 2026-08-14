@@ -121,7 +121,17 @@ def summarize_file(settings: GrokSettings, path: Path) -> dict:
             time.sleep(prompts.REQUEST_PAUSE_SEC)
         final_source = "\n\n".join(chunk_summaries)
 
-    final_prompt = prompts.FINAL_USER_PROMPT_TEMPLATE
+    # Analyst/Investor Day는 어닝콜 프레임(컨센서스 비교·분기 실적)이 안 맞으므로
+    # 전용 프롬프트(중장기 목표·전략·로드맵 중심)를 쓴다. 파일명으로 판별.
+    import re as _re
+
+    is_investor_day = bool(_re.search(r"investor day|analyst day", path.name, _re.I))
+    if is_investor_day:
+        final_prompt = prompts.INVESTORDAY_USER_PROMPT_TEMPLATE
+        system_prompt = prompts.INVESTORDAY_SYSTEM_PROMPT
+    else:
+        final_prompt = prompts.FINAL_USER_PROMPT_TEMPLATE
+        system_prompt = prompts.FINAL_SYSTEM_PROMPT
     final_prompt = final_prompt.replace("{{TICKER}}", title)
     final_prompt = final_prompt.replace("{{QUARTER}}", quarter)
     final_prompt = final_prompt.replace("{{SESSION}}", session)
@@ -130,7 +140,7 @@ def summarize_file(settings: GrokSettings, path: Path) -> dict:
 
     final_summary = call_grok(
         settings,
-        system_prompt=prompts.FINAL_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         user_prompt=final_prompt,
         max_output_tokens=prompts.FINAL_SUMMARY_MAX_OUTPUT_TOKENS,
     )

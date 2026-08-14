@@ -153,3 +153,54 @@ CHUNK_SUMMARY_MAX_OUTPUT_TOKENS = 800
 FINAL_SUMMARY_MAX_OUTPUT_TOKENS = 3200
 REQUEST_PAUSE_SEC = 1.0
 FILE_FORMAT_PREFERENCE = ["docx", "pdf"]
+
+
+# ── Analyst/Investor Day 전용 (2026-08-14) ──────────────────────────────
+# 어닝콜과 달리 컨센서스 비교·분기 실적 프레임이 없다. 중장기 목표·전략·로드맵
+# 중심으로 요약한다. 스타일 규칙(길이·bullet·번역투 금지·표 금지)은 어닝콜과 동일.
+
+INVESTORDAY_SYSTEM_PROMPT = FINAL_SYSTEM_PROMPT.replace(
+    "an earnings-call summary", "an analyst/investor day summary"
+)
+
+INVESTORDAY_USER_PROMPT_TEMPLATE = """아래 Analyst/Investor Day transcript와 metadata를 바탕으로 행사 요약을 작성한다.
+
+{LANGUAGE_RULE_KO}
+
+[출력 형식]
+- 분량은 Telegram 단일 메시지에 들어가도록 공백 포함 3,500자 이내(권장 3,200자).
+- '중장기 목표'·'제품·기술 로드맵'은 간결한 수치·개조식 bullet, '전략 방향'·'Q&A 핵심'은 완결 문장 bullet.
+- 섹션 제목만 <b>...</b>로 감싼다. 그 외 HTML 태그·Markdown table 금지.
+- 영어 직역 번역투 금지(성장 내구성→성장 지속성, 구조적 순풍→구조적 성장 요인, 레버→성장 동력 등). 국문 리서치 관용 표현을 쓴다.
+- 같은 숫자를 여러 섹션에서 반복하지 않는다. 별도 서론 없이 아래 섹션 순서대로 출력한다.
+
+<b>{{TICKER}} | Analyst/Investor Day</b>
+
+<b>🎯 행사 핵심</b>
+행사의 성격과 가장 중요한 메시지 2~3개를 완결 문장 bullet로. 무엇이 새로 공개됐고 왜 중요한지.
+
+<b>📈 중장기 재무 목표</b>
+제시된 재무 목표를 '항목: 목표치 (기간)' 개조식 bullet로. 매출·마진·EPS·FCF·CAGR 등. 기존 목표 대비 변경(상향/하향/신규)이 언급되면 명시. 목표가 없으면 이 섹션 생략.
+
+<b>🧭 전략 방향</b>
+사업 포트폴리오·투자 우선순위·자본배분 등 전략 메시지를 3~4개 완결 문장 bullet로.
+
+<b>🛠 제품·기술 로드맵</b>
+신제품·기술·출시 시점을 '제품/기술: 내용 (시점)' 개조식 bullet로. 없으면 생략.
+
+<b>🌐 시장·수요 전망</b>
+TAM·수요 전망·경쟁 구도 관련 언급을 2~3개 bullet로. 없으면 생략.
+
+<b>❓ Q&A 핵심</b>
+투자 판단에 중요한 질문 최대 4개. 각 문항은 질문 요지와 답변 핵심을 짧은 서술로. Q&A가 없으면 생략.
+
+[METADATA]
+{{METADATA}}
+
+[TRANSCRIPT]
+{{TRANSCRIPT}}
+"""
+
+INVESTORDAY_USER_PROMPT_TEMPLATE = INVESTORDAY_USER_PROMPT_TEMPLATE.replace(
+    "{LANGUAGE_RULE_KO}", LANGUAGE_RULE_KO
+)
