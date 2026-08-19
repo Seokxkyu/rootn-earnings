@@ -2,7 +2,7 @@
 # CapIQ 파이프라인 Mac(mini) 설치 스크립트.
 #
 # Windows의 register_collection_task.ps1 대응물. 저장소를 clone한 뒤 이 스크립트를
-# 실행하면 venv·의존성 설치와 launchd 스케줄(매일 07:30/09:30/13:30/16:30/22:30) 등록까지 끝난다.
+# 실행하면 venv·의존성 설치와 launchd 스케줄(매일 07:30/10:30/22:30) 등록까지 끝난다.
 #
 # 실행 전 Windows에서 복사해 와야 하는 것:
 #   1. .env                      (CAPIQ/XAI/TELEGRAM 키 — git에 없음)
@@ -50,7 +50,7 @@ echo "== 2/4 venv + 의존성 =="
 "$PYTHON_BIN" -m playwright install chrome >/dev/null 2>&1 || true
 echo "   완료: $PYTHON_BIN"
 
-echo "== 3/4 launchd LaunchAgent 등록 (매일 07:30 / 09:30 / 13:30 / 16:30 / 22:30) =="
+echo "== 3/4 launchd LaunchAgent 등록 (매일 07:30 / 10:30 / 22:30) =="
 mkdir -p "$HOME/Library/LaunchAgents" logs
 cat > "$PLIST_PATH" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -68,9 +68,7 @@ cat > "$PLIST_PATH" <<PLIST
     <key>StartCalendarInterval</key>
     <array>
         <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>30</integer></dict>
-        <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer></dict>
-        <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>30</integer></dict>
-        <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>30</integer></dict>
+        <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>30</integer></dict>
         <dict><key>Hour</key><integer>22</integer><key>Minute</key><integer>30</integer></dict>
     </array>
     <key>StandardOutPath</key><string>${ROOT}/logs/launchd_pipeline.out.log</string>
