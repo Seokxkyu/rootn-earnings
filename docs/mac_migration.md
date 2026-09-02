@@ -26,7 +26,7 @@ Windows(E:\Earnings) → Mac mini로 파이프라인을 옮기는 절차. 코드
 cd ~/Earnings && bash scripts/setup_mac.sh
 ```
 
-venv·의존성 설치, manifest 경로 정규화, launchd 등록(매일 07:30/10:30/22:30)까지 자동.
+venv·의존성 설치, manifest 경로 정규화, launchd 등록(매일 05:00/07:30/09:00/10:30/22:30)까지 자동.
 
 ## 4. CapIQ 세션 확립 (1회)
 
