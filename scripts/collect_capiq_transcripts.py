@@ -716,6 +716,17 @@ def cleanup_stale_browser() -> None:
             (PROFILE_DIR / name).unlink()
         except FileNotFoundError:
             pass
+    # 강제 종료 흔적을 '정상 종료'로 복구해 복원 팝업의 근원을 제거한다.
+    prefs_path = PROFILE_DIR / "Default" / "Preferences"
+    try:
+        prefs = json.loads(prefs_path.read_text(encoding="utf-8"))
+        profile = prefs.setdefault("profile", {})
+        if profile.get("exit_type") != "Normal":
+            profile["exit_type"] = "Normal"
+            profile["exited_cleanly"] = True
+            prefs_path.write_text(json.dumps(prefs, ensure_ascii=False), encoding="utf-8")
+    except (OSError, json.JSONDecodeError):
+        pass
 
 
 def _collect(run_started_at: datetime) -> int:
@@ -748,6 +759,9 @@ def _collect(run_started_at: datetime) -> int:
             headless=False,
             accept_downloads=True,
             viewport={"width": 1600, "height": 900},
+            # 강제 종료 이력이 있으면 Chrome이 "페이지 복원" 팝업을 띄운다.
+            # 수집엔 무해하지만 사용자 혼란·클릭 유도가 있어 억제한다.
+            args=["--hide-crash-restore-bubble", "--disable-session-crashed-bubble"],
         )
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         open_transcripts_page(page)
