@@ -754,6 +754,13 @@ def _collect(run_started_at: datetime) -> int:
 
         if setup_mode:
             print("Sign in to Capital IQ in the opened browser window. Waiting up to 10 minutes...")
+            # 이메일·비밀번호는 .env 계정으로 자동 입력을 시도한다(MFA만 수동).
+            # try_login이 내부에서 로그인 완료를 폴링하므로 실패해도 아래 대기 루프가 이어받는다.
+            if not is_logged_in(page):
+                try:
+                    try_login(page)
+                except Exception as exc:  # noqa: BLE001 - 자동 입력 실패 시 수동 입력으로 폴백
+                    log.warning("setup 자동 입력 실패(수동으로 진행하세요): %s", exc)
             deadline = time.time() + 600
             stable_checks = 0
             while time.time() < deadline and stable_checks < 2:
