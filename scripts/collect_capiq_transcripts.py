@@ -416,6 +416,16 @@ def try_login(page: Page) -> bool:
     if is_logged_in(page):
         return True
 
+    # 자동 입력이 안 먹은 경우(입력칸 선택자 불일치 등) 원인 파악용으로 로그인
+    # 화면 HTML을 남긴다. 화면 개편 시 이 스냅샷으로 선택자를 갱신한다.
+    if email_addr and email_input is None:
+        try:
+            snap = LOG_DIR / f"login_page_{datetime.now():%Y%m%d_%H%M%S}.html"
+            snap.write_text(page.content(), encoding="utf-8")
+            log.warning("이메일 입력칸을 찾지 못함 — 로그인 화면 스냅샷: %s", snap)
+        except Exception:  # noqa: BLE001
+            pass
+
     log.warning(
         "세션이 만료되었습니다. 열린 브라우저 창에서 로그인을 완료하세요 "
         "(필요 시 이메일/비밀번호 입력 후, MFA 4자리 코드 직접 입력). 최대 %d초 대기합니다.",
