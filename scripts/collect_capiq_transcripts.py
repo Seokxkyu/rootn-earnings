@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -696,8 +697,30 @@ def acquire_collector_lock():
     return fh
 
 
+def cleanup_stale_browser() -> None:
+    """잠금 확보 직후: 이 프로필을 잡고 있는 잔여 Chrome을 정리한다.
+
+    직전 실행이 크래시했거나 방금 끝난 경우 파이썬은 죽어도 Chrome이 몇 초~수분
+    프로필을 물고 남는다. 그 상태에서 새 Chrome을 띄우면 싱글턴 충돌로
+    TargetClosedError가 나며 연쇄 실패한다(2026-09-02 실제 발생). 잠금을 이미
+    확보했으므로 이 프로필의 Chrome은 전부 잔재 — 죽이고 시작하는 것이 안전하다."""
+    result = subprocess.run(
+        ["pgrep", "-f", f"user-data-dir={PROFILE_DIR}"], capture_output=True, text=True
+    )
+    if result.stdout.strip():
+        log.info("잔여 Chrome %d개 정리 후 시작", len(result.stdout.split()))
+        subprocess.run(["pkill", "-f", f"user-data-dir={PROFILE_DIR}"], capture_output=True)
+        time.sleep(3)
+    for name in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+        try:
+            (PROFILE_DIR / name).unlink()
+        except FileNotFoundError:
+            pass
+
+
 def _collect(run_started_at: datetime) -> int:
     _lock = acquire_collector_lock()  # noqa: F841 - 실행 동안 잠금 유지
+    cleanup_stale_browser()
     setup_mode = "--setup" in sys.argv
     dump_mode = "--dump" in sys.argv
 
