@@ -680,11 +680,30 @@ def main() -> int:
             logging.StreamHandler(),
         ],
     )
-    try:
-        return _collect(run_started_at)
-    except Exception:  # noqa: BLE001 - traceback을 stderr로만 흘리지 않고 로그에 남긴다
-        log.exception("수집 중 처리되지 않은 예외로 실패 (exit 1)")
-        return 1
+    # Chrome 자동 업데이트 빌드가 다운로드 중 간헐적으로 크래시(SIGSEGV)한다
+    # (2026-09-03~04 Chrome 152.x에서 반복 관측, 재시도하면 대부분 성공).
+    # TargetClosedError면 새 브라우저로 최대 3회까지 자동 재시도한다.
+    # 이미 받은 파일은 manifest 중복 방지가 지켜주므로 이어받기에 안전하다.
+    from playwright._impl._errors import TargetClosedError
+
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return _collect(run_started_at)
+        except TargetClosedError:
+            log.warning("브라우저 크래시 감지 (시도 %d/%d)%s", attempt, max_attempts,
+                        " — 새 브라우저로 재시도" if attempt < max_attempts else "")
+            if attempt >= max_attempts:
+                log.exception("크래시 재시도 소진으로 실패 (exit 1)")
+                return 1
+            time.sleep(5)
+        except Exception:  # noqa: BLE001 - traceback을 stderr로만 흘리지 않고 로그에 남긴다
+            log.exception("수집 중 처리되지 않은 예외로 실패 (exit 1)")
+            return 1
+    return 1
+
+
+_COLLECTOR_LOCK_FH = None
 
 
 def acquire_collector_lock():
@@ -697,6 +716,9 @@ def acquire_collector_lock():
     """
     import fcntl
 
+    global _COLLECTOR_LOCK_FH
+    if _COLLECTOR_LOCK_FH is not None:  # 크래시 재시도 등 같은 프로세스의 재진입
+        return _COLLECTOR_LOCK_FH
     LOG_DIR.mkdir(exist_ok=True)
     fh = open(LOG_DIR / "collector.lock", "w")
     try:
@@ -704,6 +726,7 @@ def acquire_collector_lock():
     except OSError:
         log.error("다른 수집 실행이 진행 중입니다. 이 실행은 종료합니다 (exit 4).")
         sys.exit(4)
+    _COLLECTOR_LOCK_FH = fh
     return fh
 
 
