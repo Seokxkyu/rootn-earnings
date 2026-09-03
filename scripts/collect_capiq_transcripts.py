@@ -31,7 +31,36 @@ from pathlib import Path
 from playwright.sync_api import Locator, Page, TimeoutError as PWTimeout, sync_playwright
 
 ROOT = Path(__file__).resolve().parent.parent
-PROFILE_DIR = ROOT / ".browser_profile"
+# 브라우저 채널: config의 browser_channel("chromium"|"chrome", 기본 chromium).
+# 번들 Chromium은 Playwright와 버전이 고정돼 Chrome 자동 업데이트로 인한
+# 크래시(2026-09-03~04 SIGSEGV/SIGBUS)가 구조적으로 불가능하다. 문제 시
+# config에서 "chrome"으로 되돌리면 기존 프로필로 즉시 복귀한다.
+def _browser_channel() -> str:
+    try:
+        with open(ROOT / "config" / "collector_config.json", encoding="utf-8") as f:
+            return str(json.load(f).get("browser_channel", "chromium")).lower()
+    except Exception:  # noqa: BLE001
+        return "chromium"
+
+
+BROWSER_CHANNEL = None  # 지연 초기화(모듈 로드시 json 미로딩 문제 회피)
+
+
+def get_browser_channel() -> str:
+    global BROWSER_CHANNEL
+    if BROWSER_CHANNEL is None:
+        BROWSER_CHANNEL = _browser_channel()
+    return BROWSER_CHANNEL
+
+
+def get_profile_dir() -> Path:
+    # 채널별 프로필 분리: Chrome 152 프로필을 구버전 Chromium이 열면 손상 위험.
+    if get_browser_channel() == "chrome":
+        return ROOT / ".browser_profile"
+    return ROOT / ".browser_profile_chromium"
+
+
+PROFILE_DIR = ROOT / ".browser_profile"  # (레거시 참조용 — 실행 경로는 get_profile_dir 사용)
 CONFIG_PATH = ROOT / "config" / "collector_config.json"
 TRANSCRIPTS_DIR = ROOT / "transcripts"
 MANIFEST_PATH = TRANSCRIPTS_DIR / "manifest.csv"
@@ -738,19 +767,19 @@ def cleanup_stale_browser() -> None:
     TargetClosedError가 나며 연쇄 실패한다(2026-09-02 실제 발생). 잠금을 이미
     확보했으므로 이 프로필의 Chrome은 전부 잔재 — 죽이고 시작하는 것이 안전하다."""
     result = subprocess.run(
-        ["pgrep", "-f", f"user-data-dir={PROFILE_DIR}"], capture_output=True, text=True
+        ["pgrep", "-f", f"user-data-dir={get_profile_dir()}"], capture_output=True, text=True
     )
     if result.stdout.strip():
         log.info("잔여 Chrome %d개 정리 후 시작", len(result.stdout.split()))
-        subprocess.run(["pkill", "-f", f"user-data-dir={PROFILE_DIR}"], capture_output=True)
+        subprocess.run(["pkill", "-f", f"user-data-dir={get_profile_dir()}"], capture_output=True)
         time.sleep(3)
     for name in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
         try:
-            (PROFILE_DIR / name).unlink()
+            (get_profile_dir() / name).unlink()
         except FileNotFoundError:
             pass
     # 강제 종료 흔적을 '정상 종료'로 복구해 복원 팝업의 근원을 제거한다.
-    prefs_path = PROFILE_DIR / "Default" / "Preferences"
+    prefs_path = get_profile_dir() / "Default" / "Preferences"
     try:
         prefs = json.loads(prefs_path.read_text(encoding="utf-8"))
         profile = prefs.setdefault("profile", {})
@@ -786,9 +815,11 @@ def _collect(run_started_at: datetime) -> int:
         raise ValueError("max_per_run must be at least 1.")
 
     with sync_playwright() as p:
+        launch_kwargs = {"channel": "chrome"} if get_browser_channel() == "chrome" else {}
+        log.info("브라우저: %s (프로필 %s)", get_browser_channel(), get_profile_dir().name)
         ctx = p.chromium.launch_persistent_context(
-            str(PROFILE_DIR),
-            channel="chrome",
+            str(get_profile_dir()),
+            **launch_kwargs,
             headless=False,
             accept_downloads=True,
             viewport={"width": 1600, "height": 900},
