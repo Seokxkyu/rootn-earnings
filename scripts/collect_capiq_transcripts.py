@@ -372,6 +372,13 @@ def write_run_outputs(downloaded: list[dict], run_started_at: datetime, run_fini
 
 
 def is_logged_in(page: Page) -> bool:
+    """로그인 상태 판정.
+
+    URL 해시(#news/transcriptsSummary)만 보면 SPA 렌더가 느리거나 CapIQ가 다른
+    화면을 먼저 띄울 때 '만료'로 오판한다(2026-09-20~21 실제 발생: 세션은 멀쩡한데
+    3일간 전 회차 실패). 로그인 입력칸이 보이지 않고 앱 화면이 떠 있으면 로그인된
+    것으로 본다 — 해시는 그 근거 중 하나일 뿐이다.
+    """
     url = page.url.lower()
     if "login" in url or "web/client" not in url:
         return False
@@ -381,9 +388,34 @@ def is_logged_in(page: Page) -> bool:
             control = page.locator(sel).first
             if control.count() and control.is_visible():
                 return False
-        return "transcriptssummary" in page.url.lower()
+        if "transcriptssummary" in url:
+            return True
+        # 해시가 아직/다르게 잡혀도 앱 셸이 떴으면 로그인 상태다.
+        title = (page.title() or "").lower()
+        return "transcript" in title or "capital iq" in title
     except Exception:  # noqa: BLE001
         return False
+
+
+def wait_logged_in(page: Page, timeout_sec: int = 40) -> bool:
+    """앱 로드를 기다리며 로그인 상태를 폴링한다.
+
+    고정 대기(8초)로는 콜드 스타트의 느린 SPA 렌더를 못 기다려 오판이 난다.
+    로그인 화면이 명확히 뜨면 즉시 False로 빠져 재로그인 흐름을 탄다.
+    """
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        if is_logged_in(page):
+            return True
+        try:
+            for sel in (SEL["login_email"], SEL["login_password"], SEL["mfa_input"]):
+                control = page.locator(sel).first
+                if control.count() and control.is_visible():
+                    return False  # 진짜 로그인 화면
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(2)
+    return is_logged_in(page)
 
 
 def wait_visible(page: Page, selector: str, timeout: int = 8000):
@@ -442,7 +474,7 @@ def try_login(page: Page) -> bool:
         safe_click(page, SEL["login_signin"])
         page.wait_for_timeout(5000)
 
-    if is_logged_in(page):
+    if wait_logged_in(page, timeout_sec=20):
         return True
 
     # 자동 입력이 안 먹은 경우(입력칸 선택자 불일치 등) 원인 파악용으로 로그인
@@ -855,7 +887,7 @@ def _collect(run_started_at: datetime) -> int:
             ctx.close()
             return 1
 
-        if not is_logged_in(page):
+        if not wait_logged_in(page):
             log.info("Session expired; attempting automatic re-authentication")
             if not try_login(page):
                 ctx.close()
