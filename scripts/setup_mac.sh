@@ -65,6 +65,9 @@ cat > "$PLIST_PATH" <<PLIST
         <string>--heartbeat</string>
     </array>
     <key>WorkingDirectory</key><string>${ROOT}</string>
+    <!-- 로그인(=재부팅 후 포함) 시 1회 즉시 실행: 꺼져 있거나 로그인 화면에 멈춰
+         놓친 회차를 따라잡는다. launchd는 '전원 꺼짐' 중 놓친 스케줄은 보충하지 않는다. -->
+    <key>RunAtLoad</key><true/>
     <key>StartCalendarInterval</key>
     <array>
         <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>30</integer></dict>

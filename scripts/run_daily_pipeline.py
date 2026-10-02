@@ -36,6 +36,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime
 
 from summary_lib.config import (
@@ -162,6 +163,35 @@ def index_embeddings() -> None:
         log.warning("임베딩 인덱싱 실패 (무시, 키워드 검색으로 폴백): %s", (err or "").strip()[:200])
 
 
+def wait_for_network(timeout_sec: int = 600, interval_sec: int = 15) -> bool:
+    """CapIQ·텔레그램 호스트에 연결 가능해질 때까지 대기.
+
+    네트워크가 끊긴 채 실행되면 수집이 즉시 실패하고, 장애 알림조차 못 보내
+    조용히 회차가 날아간다(2026-10-02 07:30: Errno 49, IP 주소 없음). 잠깐의
+    끊김(Wi-Fi 재연결·DHCP 갱신)은 몇 분 안에 복구되므로 최대 10분 기다린다.
+    """
+    import socket
+
+    hosts = ("www.capitaliq.spglobal.com", "api.telegram.org")
+    deadline = time.time() + timeout_sec
+    first = True
+    while True:
+        try:
+            for host in hosts:
+                socket.create_connection((host, 443), timeout=10).close()
+            if not first:
+                log.info("네트워크 복구 확인 — 파이프라인 진행")
+            return True
+        except OSError as exc:
+            if time.time() >= deadline:
+                log.error("네트워크 %d초 내 미복구로 중단: %s", timeout_sec, exc)
+                return False
+            if first:
+                log.warning("네트워크 연결 불가 — 복구 대기 (최대 %d초): %s", timeout_sec, exc)
+                first = False
+            time.sleep(interval_sec)
+
+
 def main() -> int:
     load_env_file()
     setup_logging()
@@ -175,6 +205,10 @@ def main() -> int:
 
     heartbeat = "--heartbeat" in sys.argv
 
+    # --- STEP 0: 네트워크 준비 대기 (끊긴 채 실행되면 알림조차 못 보내고 회차 유실) ---
+    if not wait_for_network():
+        return 5  # 네트워크 미복구 — 알림 불가 상태라 로그로만 남는다
+
     # --- STEP 1: 수집 ---
     code, err = run_step("수집", [str(COLLECT_SCRIPT)])
     if code == 2:
@@ -185,6 +219,11 @@ def main() -> int:
             "브라우저 창에서 로그인(이메일·비밀번호·MFA 4자리)을 완료하면 세션이 다시 유지됩니다."
         )
         return 2
+    if code == 4:
+        # 다른 수집 실행(로그인 시 따라잡기·수동 실행 등)이 진행 중 — 그쪽이 처리하므로
+        # 실패 알림 없이 이번 회차만 건너뛴다.
+        log.info("다른 수집 실행이 진행 중 — 이번 회차는 건너뜀")
+        return 0
     if code == 3:
         notify_alert(
             "⚠️ <b>CapIQ 그리드 로드 실패 의심</b>\n"
