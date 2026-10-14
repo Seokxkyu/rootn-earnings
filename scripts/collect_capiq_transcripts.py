@@ -388,10 +388,15 @@ def is_logged_in(page: Page) -> bool:
             control = page.locator(sel).first
             if control.count() and control.is_visible():
                 return False
+        # 앱이 실제로 렌더됐는지 확인한다. 이동 직후엔 URL이 이미 transcriptsSummary라
+        # 렌더 전 빈 화면(제목 없음)도 통과해 버려, 진짜 만료를 '그리드 로드 실패'로
+        # 오분류할 수 있다(2026-10-14 진단에서 확인).
+        title = (page.title() or "").lower()
+        if not title:
+            return False
         if "transcriptssummary" in url:
             return True
-        # 해시가 아직/다르게 잡혀도 앱 셸이 떴으면 로그인 상태다.
-        title = (page.title() or "").lower()
+        # 해시가 다르게 잡혀도 앱 셸이 떴으면 로그인 상태다.
         return "transcript" in title or "capital iq" in title
     except Exception:  # noqa: BLE001
         return False
