@@ -402,6 +402,30 @@ def is_logged_in(page: Page) -> bool:
         return False
 
 
+def _login_done_check(page: Page) -> bool:
+    """수동 로그인 대기 중의 완료 판정.
+
+    MFA를 마치면 CapIQ가 transcript 화면이 아닌 다른 첫 화면으로 보내는 경우가 있어,
+    is_logged_in만으로는 완료를 영영 못 알아챈다(2026-10-16 setup이 로그인 후에도
+    대기하다 시간 초과). 로그인 입력칸이 사라졌는데 transcript 화면이 아니면
+    transcript 페이지로 직접 이동해 다시 판정한다.
+    """
+    if is_logged_in(page):
+        return True
+    try:
+        for sel in (SEL["login_email"], SEL["login_password"], SEL["mfa_input"]):
+            control = page.locator(sel).first
+            if control.count() and control.is_visible():
+                return False  # 아직 로그인 진행 중
+        url = page.url.lower()
+        if "web/client" in url and "transcriptssummary" not in url:
+            page.goto(TRANSCRIPTS_URL, wait_until="domcontentloaded", timeout=60000)
+            return wait_logged_in(page, timeout_sec=30)
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
 def wait_logged_in(page: Page, timeout_sec: int = 40) -> bool:
     """앱 로드를 기다리며 로그인 상태를 폴링한다.
 
@@ -501,7 +525,7 @@ def try_login(page: Page) -> bool:
     stable_checks = 0
     while time.time() < deadline and stable_checks < 2:
         time.sleep(5)
-        stable_checks = stable_checks + 1 if is_logged_in(page) else 0
+        stable_checks = stable_checks + 1 if _login_done_check(page) else 0
     return stable_checks >= 2
 
 
@@ -880,7 +904,7 @@ def _collect(run_started_at: datetime) -> int:
             stable_checks = 0
             while time.time() < deadline and stable_checks < 2:
                 time.sleep(5)
-                stable_checks = stable_checks + 1 if is_logged_in(page) else 0
+                stable_checks = stable_checks + 1 if _login_done_check(page) else 0
             if stable_checks >= 2:
                 page.wait_for_timeout(10000)
                 snapshot = LOG_DIR / f"grid_dump_{datetime.now():%Y%m%d_%H%M%S}.html"
