@@ -491,30 +491,53 @@ def try_login(page: Page) -> bool:
         pass
     page.wait_for_timeout(2000)
 
+    # 제출은 엔터 키로 한다. 버튼 문구("NEXT"/"SIGN IN")로 찾아 누르면 CapIQ가
+    # 문구를 바꿨을 때 클릭이 조용히 실패해, 원래 무인으로 복구되던 세션 만료가
+    # 사람 손을 타게 된다(2026-10 들어 자동 재로그인이 매번 실패한 원인 추정).
     email_input = wait_visible(page, SEL["login_email"])
     if email_addr and email_input is not None:
         email_input.fill(email_addr)
-        safe_click(page, SEL["login_next"])
+        email_input.press("Enter")
         page.wait_for_timeout(3000)
+        if email_input.is_visible():  # 엔터로 안 넘어간 화면이면 버튼 클릭 시도
+            safe_click(page, SEL["login_next"])
+            page.wait_for_timeout(3000)
 
     password_input = wait_visible(page, SEL["login_password"])
     if password and password_input is not None:
         password_input.fill(password)
-        safe_click(page, SEL["login_signin"])
+        password_input.press("Enter")
         page.wait_for_timeout(5000)
+        try:
+            still = password_input.is_visible()
+        except Exception:  # noqa: BLE001 - 화면 전환으로 요소가 사라지면 제출된 것
+            still = False
+        if still:
+            safe_click(page, SEL["login_signin"])
+            page.wait_for_timeout(5000)
 
     if wait_logged_in(page, timeout_sec=20):
         return True
 
     # 자동 입력이 안 먹은 경우(입력칸 선택자 불일치 등) 원인 파악용으로 로그인
     # 화면 HTML을 남긴다. 화면 개편 시 이 스냅샷으로 선택자를 갱신한다.
-    if email_addr and email_input is None:
-        try:
-            snap = LOG_DIR / f"login_page_{datetime.now():%Y%m%d_%H%M%S}.html"
-            snap.write_text(page.content(), encoding="utf-8")
-            log.warning("이메일 입력칸을 찾지 못함 — 로그인 화면 스냅샷: %s", snap)
-        except Exception:  # noqa: BLE001
-            pass
+    # 자동 재로그인이 어디서 멈췄는지 남긴다(입력칸 미발견·제출 실패·추가 단계 등).
+    try:
+        stamp = f"{datetime.now():%Y%m%d_%H%M%S}"
+        snap = LOG_DIR / f"login_page_{stamp}.html"
+        snap.write_text(page.content(), encoding="utf-8")
+        inputs = [
+            f"{el.get_attribute('type')}:{el.get_attribute('name') or el.get_attribute('placeholder')}"
+            for el in page.locator("input:visible").all()[:8]
+        ]
+        buttons = [norm(b.inner_text())[:30] for b in page.locator("button:visible").all()[:8]]
+        log.warning(
+            "자동 재로그인 미완료 — url=%s | 이메일칸=%s 비번칸=%s | 보이는 입력=%s | 버튼=%s | 스냅샷 %s",
+            page.url[:90], email_input is not None, password_input is not None,
+            inputs, buttons, snap.name,
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
     log.warning(
         "세션이 만료되었습니다. 열린 브라우저 창에서 로그인을 완료하세요 "
