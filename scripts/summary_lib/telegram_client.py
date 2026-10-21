@@ -118,7 +118,9 @@ def send_messages(
                 sent += 1
                 log.info("Sent Telegram message %d/%d (%d chars)", idx, len(messages), len(message))
                 break
-            except RuntimeError as exc:
+            # requests 연결 오류(Connection reset 등)도 재시도한다. RuntimeError만 잡으면
+            # 일시적 네트워크 끊김이 곧바로 전송 실패가 된다(2026-10-21 GE 사례).
+            except (RuntimeError, requests.RequestException) as exc:
                 if attempt >= max_attempts:
                     raise
                 wait_sec = 5 * attempt
