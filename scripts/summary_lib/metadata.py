@@ -84,7 +84,8 @@ def extract_session(text: str) -> str:
     for line in text.splitlines()[:20]:
         lowered = line.lower()
         if "earnings call" in lowered or "conference call" in lowered:
-            return norm(line)
+            # CapIQ 헤더가 'FQ3 2026 Earnings Call Transcripts'처럼 붙여 오는 경우 정리.
+            return re.sub(r"\s+Transcripts?$", "", norm(line), flags=re.I)
     return "확인 불가"
 
 
