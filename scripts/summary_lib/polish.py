@@ -49,7 +49,7 @@ POLISH_SYSTEM = """너는 한국 증권사 리서치센터의 편집자다. 애�
 
 절대 바꾸지 말 것:
 - 모든 숫자·%·통화기호·단위·날짜·분기 표기(FQ4 2026 등)·티커·회사명·제품명
-- <b>...</b> 태그 위치와 개수, 줄 구성, 섹션 제목, bullet 개수와 순서, '[[KEEP_n]]' 자리표시자
+- <b>...</b> 태그 위치와 개수(Markdown ** 사용 금지), 줄 앞 글머리 기호('-' 등), 줄 구성, 섹션 제목, bullet 개수와 순서, '[[KEEP_n]]' 자리표시자
 - 내용(사실)은 더하거나 빼지 않는다. 표현만 바꾼다.
 
 출력: 다듬은 전체 텍스트만. 설명·머리말 없이."""
@@ -97,6 +97,12 @@ def polish_summary(settings: GrokSettings, summary: str) -> str:
         return summary
     if _numbers(out) != _numbers(masked_text):
         log.warning("교정 패스가 숫자를 바꿈 — 원본 사용")
+        return summary
+    if [ln[:1] for ln in out.split("\n") if ln.strip()] != [ln[:1] for ln in masked_text.split("\n") if ln.strip()]:
+        log.warning("교정 패스가 줄 구성·글머리 기호를 바꿈 — 원본 사용")
+        return summary
+    if "**" in out and "**" not in masked_text:
+        log.warning("교정 패스가 Markdown을 넣음 — 원본 사용")
         return summary
     if out.count("<b>") != masked_text.count("<b>"):
         log.warning("교정 패스가 굵게 태그를 바꿈 — 원본 사용")

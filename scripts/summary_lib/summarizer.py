@@ -7,6 +7,7 @@ from pathlib import Path
 
 from . import prompts
 from .config import ROOT, SUMMARY_ROOT, GrokSettings
+from .facts import apply_range_guidance, build_facts, consensus_hint_lines, normalize_terms, tidy_numbers
 from .grok_client import call_grok
 from .metadata import (
     extract_exchange,
@@ -16,6 +17,7 @@ from .metadata import (
     extract_ticker,
     title_label,
 )
+from .polish import polish_summary
 from .transcript_io import load_transcript_text, norm, slugify
 
 log = logging.getLogger("summary")
@@ -130,8 +132,13 @@ def summarize_file(settings: GrokSettings, path: Path) -> dict:
         final_prompt = prompts.INVESTORDAY_USER_PROMPT_TEMPLATE
         system_prompt = prompts.INVESTORDAY_SYSTEM_PROMPT
     else:
-        final_prompt = prompts.FINAL_USER_PROMPT_TEMPLATE
+        # v2(2026-10-23 운영 전환): 코드가 계산한 확정 수치 헤드라인 + 컨센 대비 가이던스.
+        final_prompt = prompts.FINAL_USER_PROMPT_TEMPLATE_V2
         system_prompt = prompts.FINAL_SYSTEM_PROMPT
+        facts = build_facts(metadata_block)
+        hints = consensus_hint_lines(metadata_block)
+        final_prompt = final_prompt.replace("{{FACTS}}", "\n".join(facts) if facts else "(없음)")
+        final_prompt = final_prompt.replace("{{NEXT_CONSENSUS}}", "\n".join(hints) if hints else "(없음)")
     final_prompt = final_prompt.replace("{{TICKER}}", title)
     final_prompt = final_prompt.replace("{{QUARTER}}", quarter)
     final_prompt = final_prompt.replace("{{SESSION}}", session)
@@ -144,6 +151,11 @@ def summarize_file(settings: GrokSettings, path: Path) -> dict:
         user_prompt=final_prompt,
         max_output_tokens=prompts.FINAL_SUMMARY_MAX_OUTPUT_TOKENS,
     )
+    final_summary = tidy_numbers(final_summary)
+    if not is_investor_day:
+        final_summary = apply_range_guidance(final_summary, metadata_block)
+    # 표현 교정(숫자 바뀌면 원본 유지) → 표기 하드룰(YoY·Q3·bp·$B 등) 기계 치환
+    final_summary = normalize_terms(polish_summary(settings, final_summary))
 
     md_path = summary_md_path(path)
     md_path.parent.mkdir(parents=True, exist_ok=True)

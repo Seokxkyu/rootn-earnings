@@ -44,7 +44,8 @@ def _label(raw: str) -> tuple[str, bool]:
     if low.startswith("revenue"):
         name = "매출"
     elif low.startswith("eps"):
-        name = "EPS" + (f"({name[3:].strip()})" if name[3:].strip() else "")
+        qual = name[3:].strip().strip("()").strip()  # 'EPS (GAAP)' / 'EPS GAAP' 모두 EPS(GAAP)
+        name = "EPS" + (f"({qual})" if qual else "")
     return name, is_mm
 
 
@@ -265,6 +266,9 @@ def _pct_point_repl(m: re.Match) -> str:
 
 
 def normalize_terms(text: str) -> str:
+    # 텔레그램은 HTML 모드라 Markdown이 날것으로 보인다: **굵게**→<b>, •/* 글머리→'-'
+    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+    text = re.sub(r"(?m)^(\s*)[•·*]\s+", r"\1- ", text)
     text = _MONEY_EOK.sub(_money_repl, text)
     text = _PCT_POINT.sub(_pct_point_repl, text)
     for pat, rep in _TERM_MAP:
