@@ -189,18 +189,88 @@ def apply_range_guidance(summary: str, metadata_block: str) -> str:
     return _RANGE_LINE.sub(repl, summary)
 
 
-# 단위·세그먼트 용어 표기 통일(문맥 무관하게 뜻이 같아 기계 치환이 안전한 것만).
-# 단위는 약어, 스토리지 세그먼트 용어는 원어 — 사용자 지정(2026-10-23).
+# 표기 하드룰(사용자 지정 2026-10-23). 문맥과 무관하게 뜻이 같은 것만 기계 치환한다.
+# 문맥에 따라 뜻이 갈리는 것(레버·제고 등)은 polish 교정 패스에서 처리한다.
 _TERM_MAP = [
-    (r"엑사바이트", "EB"),
-    (r"페타바이트", "PB"),
-    (r"테라바이트", "TB"),
-    (r"기가바이트", "GB"),
-    (r"니어라인", "nearline"),
+    # 단위 약어 / 스토리지 세그먼트 원어
+    (r"엑사바이트", "EB"), (r"페타바이트", "PB"), (r"테라바이트", "TB"), (r"기가바이트", "GB"),
+    (r"기가와트", "GW"), (r"메가와트", "MW"), (r"니어라인", "nearline"),
+    # 중국어식 한자어
+    (r"(?<![가-힣])근기(?![가-힣])", "단기"), (r"(?<![가-힣])동비(?![가-힣])", "YoY"),
+    (r"(?<![가-힣])환비(?![가-힣])", "QoQ"),
+    # YoY / QoQ 통일
+    (r"전년\s?동기\s?대비|전년동기비|전년\s?대비|전년비", "YoY"),
+    (r"직전\s?분기\s?대비|전분기\s?대비|전분기비", "QoQ"),
+    # '순차'는 sequential(QoQ) 뜻일 때만: '순차적으로 출시' 같은 일반 용법은 남긴다
+    (r"순차(?=\s?(?:성장|증가|감소|개선|하락|상승|둔화|가속|기준|[+\-−]?\d))", "QoQ"),
+    # 용어
+    (r"\brun[\s-]?rate\b|런\s?레이트", "연환산"),
+    (r"\boutlook\b|아웃룩", "전망"),
+    (r"내구성", "지속성"),
+    (r"궤적", "추이"),
+    # 분기·반기 글로벌 표기: 3분기→Q3, 3Q26→Q3 2026, 3Q→Q3, 상/하반기→H1/H2
+    (r"(?<![\d.])([1-4])분기(?!\s?(?:연속|만에|째|동안|간|치|이상|이내|내리|가량))", r"Q\1"),
+    (r"(?<![A-Za-z\d])([1-4])Q(\d{2})(?![\dA-Za-z])", r"Q\1 20\2"),
+    (r"(?<![A-Za-z\d])([1-4])Q(?![\dA-Za-z])", r"Q\1"),
+    (r"상반기", "H1"), (r"하반기", "H2"),
+]
+
+# '조'는 금액 뒤에 붙어도 '조달'·'조정'일 수 있어 공백 없이 붙고 한글이 이어지지 않을 때만 단위로 본다.
+_MONEY_EOK = re.compile(
+    r"(?:\$\s?(?P<a>\d[\d,]*(?:\.\d+)?)(?:\s?(?P<u1>억)|(?P<u1t>조)(?![가-힣]{2})))"
+    r"|(?:(?P<b>\d[\d,]*(?:\.\d+)?)\s?(?P<u2>억|조)\s?달러)"
+)
+_PCT_POINT = re.compile(r"(?P<n>[+\-−]?\d+(?:\.\d+)?)\s?(?:%\s?p\b|%p|%\s?포인트|pp\b)")
+
+
+def _exact(v: float, max_dec: int) -> str | None:
+    """소수 max_dec 자리 안에서 값이 정확히 표현되면 문자열, 아니면 None."""
+    for d in range(max_dec + 1):
+        if abs(round(v, d) - v) < 1e-9:
+            return f"{v:,.{d}f}"
+    return None
+
+
+def _money_repl(m: re.Match) -> str:
+    """$10억 / 10억 달러 → $1B, $5억 → $500M, $10.25억 → $1,025M, $1.2조 → $1.2T.
+
+    자릿수를 잃지 않도록 B·T는 소수 둘째 자리 안에서 정확할 때만 쓰고 아니면 M으로 쓴다."""
+    raw = m.group("a") or m.group("b")
+    unit = m.group("u1") or m.group("u1t") or m.group("u2")
+    dollars = float(raw.replace(",", "")) * (1e8 if unit == "억" else 1e12)
+    if dollars >= 1e12 and (t := _exact(dollars / 1e12, 2)):
+        return f"${t}T"
+    if dollars >= 1e9 and (b := _exact(dollars / 1e9, 2)):
+        return f"${b}B"
+    return f"${_exact(dollars / 1e6, 1) or f'{dollars / 1e6:,.1f}'}M"
+
+
+# 치환으로 앞말이 모음 발음으로 끝나게 된 경우(달러·추이·베이시스포인트) 받침용 조사를 고친다.
+_VOWEL_END = r"((?:\$[\d.,~]+[BMT]|\d+bp)(?:</b>)?|추이)"
+_PARTICLE_FIX = [
+    (_VOWEL_END + r"으로", r"\1로"),
+    (_VOWEL_END + r"은(?![가-힣])", r"\1는"),
+    (_VOWEL_END + r"을(?![가-힣])", r"\1를"),
+    (_VOWEL_END + r"과(?![가-힣])", r"\1와"),
+    (_VOWEL_END + r"이(?![가-힣])", r"\1가"),
 ]
 
 
+def _pct_point_repl(m: re.Match) -> str:
+    """마진 변화 %p → bp (글로벌 표기): +1.2%p → +120bp."""
+    n = m.group("n").replace("−", "-")
+    bp = round(float(n) * 100)
+    sign = "+" if n.startswith("+") else ""
+    return f"{sign}{bp}bp"
+
+
 def normalize_terms(text: str) -> str:
+    text = _MONEY_EOK.sub(_money_repl, text)
+    text = _PCT_POINT.sub(_pct_point_repl, text)
     for pat, rep in _TERM_MAP:
+        text = re.sub(pat, rep, text)
+    # '연환산 매출 run-rate' → '연환산 매출 연환산' 중복 제거
+    text = re.sub(r"(연환산\s?\S{0,6}\s)연환산\s?", r"\1", text)
+    for pat, rep in _PARTICLE_FIX:
         text = re.sub(pat, rep, text)
     return text
