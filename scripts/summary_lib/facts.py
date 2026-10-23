@@ -254,6 +254,12 @@ _PARTICLE_FIX = [
     (_VOWEL_END + r"을(?![가-힣])", r"\1를"),
     (_VOWEL_END + r"과(?![가-힣])", r"\1와"),
     (_VOWEL_END + r"이(?![가-힣])", r"\1가"),
+    # '초반·중반·후반'은 받침(ㄴ)으로 끝난다: 자릿수로→초반으로 등
+    (r"([초중후]반)로", r"\1으로"),
+    (r"([초중후]반)가(?![가-힣])", r"\1이"),
+    (r"([초중후]반)는(?![가-힣])", r"\1은"),
+    (r"([초중후]반)를(?![가-힣])", r"\1을"),
+    (r"([초중후]반)와(?![가-힣])", r"\1과"),
 ]
 
 
@@ -265,10 +271,51 @@ def _pct_point_repl(m: re.Match) -> str:
     return f"{sign}{bp}bp"
 
 
+# low/mid/high 범위 표기 → 국문 리서치 표준('한 자릿수 후반', '10%대 중반', '50%대 초중반').
+# 사용자 지정 하드룰(2026-10-23): 십중후반·고한자릿수·mid-teens 같은 직역·축약 금지.
+_POS = {"low": 0, "로우": 0, "저": 0, "낮은": 0,
+        "mid": 1, "미드": 1, "중": 1, "중간": 1,
+        "high": 2, "하이": 2, "고": 2, "높은": 2}
+_POS_WORD = r"(?:low|mid|high|로우|미드|하이|낮은|중간|높은|저|중|고)"
+_POS_RANGE = rf"(?P<p1>{_POS_WORD})(?:\s?[~·\-/]?\s?(?:to\s)?(?P<p2>{_POS_WORD}))?"
+
+
+def _pos_label(m: re.Match) -> str:
+    """('low','mid') → '초중반', ('high',) → '후반', ('low','high') → '' (구간 전체)."""
+    a = _POS[m.group("p1").lower()]
+    b = _POS[m.group("p2").lower()] if m.group("p2") else a
+    lo, hi = sorted((a, b))
+    if (lo, hi) == (0, 2):
+        return ""
+    names = "초중후"
+    return (names[lo] + (names[hi] if hi != lo else "")) + "반"
+
+
+_DIGIT_WORD = {"한": "한", "단일": "한", "single": "한", "두": "두", "double": "두", "세": "세", "triple": "세"}
+_RANGE_RULES = [
+    # 저~중한 자릿수, 중·고 한 자릿수, 낮은 두 자릿수, mid-single digit(s)
+    (re.compile(rf"(?<![가-힣A-Za-z]){_POS_RANGE}[\s\-]?(?P<d>한|두|세|단일|single|double|triple)[\s\-]?(?:자릿수|digits?)%?"),
+     lambda m: f"{_DIGIT_WORD[m.group('d').lower()]} 자릿수" + (f" {_pos_label(m)}" if _pos_label(m) else "")),
+    # 중반 두 자릿수 → 두 자릿수 중반 (어순 통일)
+    (re.compile(r"(?<![가-힣])(?P<pos>초반|중반|후반|초중반|중후반)\s(?P<d>한|두|세)\s?자릿수"),
+     lambda m: f"{m.group('d')} 자릿수 {m.group('pos')}"),
+    # mid-teens / 중고십대 / 십중후반 → 10%대 중반·중후반
+    (re.compile(rf"(?<![가-힣A-Za-z]){_POS_RANGE}[\s\-]?(?:teens|십대)"),
+     lambda m: "10%대" + (f" {_pos_label(m)}" if _pos_label(m) else "")),
+    (re.compile(r"(?<![가-힣])십\s?(?P<pos>초|중|후|초중|중후)반"), lambda m: f"10%대 {m.group('pos')}반"),
+    (re.compile(r"(?<![A-Za-z])teens\b"), lambda m: "10%대"),
+    # mid-50%, low~mid-80%, high 20s% → 50%대 중반, 80%대 초중반, 20%대 후반
+    (re.compile(rf"(?<![가-힣A-Za-z]){_POS_RANGE}[\s\-]?(?P<n>[1-9]0)(?:'?s)?\s?%대?"),
+     lambda m: f"{m.group('n')}%대" + (f" {_pos_label(m)}" if _pos_label(m) else "")),
+]
+
+
 def normalize_terms(text: str) -> str:
     # 텔레그램은 HTML 모드라 Markdown이 날것으로 보인다: **굵게**→<b>, •/* 글머리→'-'
     text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
     text = re.sub(r"(?m)^(\s*)[•·*]\s+", r"\1- ", text)
+    for pat, fn in _RANGE_RULES:
+        text = pat.sub(fn, text)
     text = _MONEY_EOK.sub(_money_repl, text)
     text = _PCT_POINT.sub(_pct_point_repl, text)
     for pat, rep in _TERM_MAP:
