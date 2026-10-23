@@ -187,3 +187,20 @@ def apply_range_guidance(summary: str, metadata_block: str) -> str:
                 f"(중간값 {_fmt(mid, is_mm, sym)}, 컨센 {_fmt(cval, is_mm, sym)}, <b>{pct:+.1f}%</b>)")
 
     return _RANGE_LINE.sub(repl, summary)
+
+
+# 단위·세그먼트 용어 표기 통일(문맥 무관하게 뜻이 같아 기계 치환이 안전한 것만).
+# 단위는 약어, 스토리지 세그먼트 용어는 원어 — 사용자 지정(2026-10-23).
+_TERM_MAP = [
+    (r"엑사바이트", "EB"),
+    (r"페타바이트", "PB"),
+    (r"테라바이트", "TB"),
+    (r"기가바이트", "GB"),
+    (r"니어라인", "nearline"),
+]
+
+
+def normalize_terms(text: str) -> str:
+    for pat, rep in _TERM_MAP:
+        text = re.sub(pat, rep, text)
+    return text

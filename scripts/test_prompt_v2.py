@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from summary_lib import prompts  # noqa: E402
 from summary_lib.config import ROOT, GrokSettings, TelegramSettings, load_env_file  # noqa: E402
-from summary_lib.facts import apply_range_guidance, build_facts, consensus_hint_lines, tidy_numbers  # noqa: E402
+from summary_lib.facts import apply_range_guidance, build_facts, consensus_hint_lines, normalize_terms, tidy_numbers  # noqa: E402
 from summary_lib.grok_client import call_grok  # noqa: E402
 from summary_lib.metadata import extract_metadata_block, extract_session, title_label  # noqa: E402
 from summary_lib.polish import polish_summary  # noqa: E402
@@ -52,7 +52,7 @@ def main() -> int:
         max_output_tokens=prompts.FINAL_SUMMARY_MAX_OUTPUT_TOKENS,
     )
     draft = apply_range_guidance(tidy_numbers(summary), metadata)
-    summary = polish_summary(GrokSettings.from_env(), draft)
+    summary = normalize_terms(polish_summary(GrokSettings.from_env(), draft))
     print(summary)
     if "--diff" in sys.argv:
         import difflib
