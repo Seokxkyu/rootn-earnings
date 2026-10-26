@@ -322,6 +322,9 @@ _RANGE_RULES = [
 
 
 def normalize_terms(text: str) -> str:
+    # 업황 시그널 줄은 증감 방향 화살표만 쓴다(헤드라인 ▲▼━와 구분)
+    text = re.sub(r"(?m)^(- (?:원가·인플레|원가|판가|수요|공급):\s?)([▲▼━])",
+                  lambda m: m.group(1) + {"▲": "↑", "▼": "↓", "━": "→"}[m.group(2)], text)
     # 텔레그램은 HTML 모드라 Markdown이 날것으로 보인다: **굵게**→<b>, •/* 글머리→'-'
     text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
     text = re.sub(r"(?m)^(\s*)[•·*]\s+", r"\1- ", text)
