@@ -133,7 +133,7 @@ def summarize_file(settings: GrokSettings, path: Path) -> dict:
         system_prompt = prompts.INVESTORDAY_SYSTEM_PROMPT
     else:
         # v2(2026-10-23 운영 전환): 코드가 계산한 확정 수치 헤드라인 + 컨센 대비 가이던스.
-        final_prompt = prompts.FINAL_USER_PROMPT_TEMPLATE_V2
+        final_prompt = prompts.FINAL_USER_PROMPT_TEMPLATE_V3  # v2 + 업황 시그널(2026-10-26 운영 전환)
         system_prompt = prompts.FINAL_SYSTEM_PROMPT
         facts = build_facts(metadata_block)
         hints = consensus_hint_lines(metadata_block)
