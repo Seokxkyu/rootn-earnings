@@ -36,7 +36,7 @@ def main() -> int:
     metadata = extract_metadata_block(display, text)
     facts = build_facts(metadata)
 
-    prompt = prompts.FINAL_USER_PROMPT_TEMPLATE_V2
+    prompt = prompts.FINAL_USER_PROMPT_TEMPLATE_V3 if "--v3" in sys.argv else prompts.FINAL_USER_PROMPT_TEMPLATE_V2
     prompt = prompt.replace("{{TICKER}}", title_label(text, path.stem))
     prompt = prompt.replace("{{SESSION}}", extract_session(text))
     prompt = prompt.replace("{{FACTS}}", "\n".join(facts) if facts else "(없음)")
@@ -64,7 +64,8 @@ def main() -> int:
 
     msgs = build_telegram_messages([{"file_name": path.name, "summary": summary}])
     target = TelegramSettings(bot_token=os.environ["TELEGRAM_BOT_TOKEN"], chat_id=PERSONAL_CHAT)
-    sent = send_messages(target, ["🧪 [테스트 v2]\n" + msgs[0]] + msgs[1:])
+    tag = "v3" if "--v3" in sys.argv else "v2"
+    sent = send_messages(target, [f"🧪 [테스트 {tag}]\n" + msgs[0]] + msgs[1:])
     print(f"개인 chat 전송: {sent}건")
     return 0
 

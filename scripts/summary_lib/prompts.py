@@ -269,3 +269,31 @@ FINAL_USER_PROMPT_TEMPLATE_V2 = """아래 earnings call transcript와 metadata�
 {{TRANSCRIPT}}
 """
 FINAL_USER_PROMPT_TEMPLATE_V2 = FINAL_USER_PROMPT_TEMPLATE_V2.replace("{LANGUAGE_RULE_KO}", LANGUAGE_RULE_KO)
+
+
+# ── v3 (2026-10-26 테스트): 업황 시그널 섹션 ─────────────────────────────
+# v2 + 원가·인플레 / 판가 / 수요 / 공급 / 고객 capex 를 고정 이름표로 모은다.
+# 언급이 없는 항목·섹션은 쓰지 않는다(억지 작성 금지가 사용자 요구).
+_SIGNAL_SECTION = """<b>🔎 업황 시그널</b>
+콜에서 경영진 또는 애널리스트가 아래 주제를 직접 언급한 경우에만 쓴다. 해당 항목만 한 줄씩, 순서 유지.
+- 원가·인플레: 원자재·부품·에너지·임금·물류·관세 등 비용 변화와 마진 영향
+- 판가: 가격 인상·인하, 평균판가(ASP), 계약 가격, 전가 여부·시점
+- 수요: 주문·수주잔고·book-to-bill·리드타임·고객 재고·최종 수요 변화
+- 공급: 자사·업계 생산능력·가동률·공급 부족/과잉·증설·감산
+- 고객 capex: 고객사·전방 산업의 투자 확대·축소 언급(자사 capex는 위 ◆ 줄에 있으므로 쓰지 않는다)
+형식: '- 항목: ▲/▼/━ 내용' (항목명은 위 다섯 개 이름 그대로) — 기호는 경영진이 말한 직전 분기 대비 변화 방향(원가는 상승=▲). 숫자가 언급됐으면 반드시 쓰고(마진 영향은 bp), 없으면 '(수치 미공개)'.
+엄격 규칙:
+- transcript에 명시적 발언이 있는 항목만 쓴다. 발언이 없는 항목은 줄을 만들지 않는다. '견조한 흐름 지속' 같은 일반론, 실적 숫자로부터의 추론, 업계 상식으로 채우지 않는다.
+- 다섯 항목 모두 언급이 없으면 섹션 제목까지 통째로 생략한다. 항목 수를 채우려고 쓰지 않는다.
+- 위 KPI·가이던스와 같은 숫자를 반복하지 않는다.
+
+"""
+
+FINAL_USER_PROMPT_TEMPLATE_V3 = FINAL_USER_PROMPT_TEMPLATE_V2.replace(
+    "<b>📈 핵심 KPI</b>", _SIGNAL_SECTION + "<b>📈 핵심 KPI</b>", 1
+).replace(
+    "3개 bullet, 각 한 문장. 숫자를 반복하지 말고 해석과 다음 분기 변수 위주.",
+    "2개 bullet, 각 한 문장. 숫자를 반복하지 말고 해석과 다음 분기 변수 위주. 업황 시그널과 겹치는 내용은 쓰지 않는다.",
+    1,
+)
+assert FINAL_USER_PROMPT_TEMPLATE_V3 != FINAL_USER_PROMPT_TEMPLATE_V2
